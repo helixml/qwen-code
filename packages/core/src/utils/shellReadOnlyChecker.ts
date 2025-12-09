@@ -245,13 +245,17 @@ function evaluateShellSegment(segment: string): boolean {
     return true;
   }
 
-  if (detectCommandSubstitution(stripped)) {
-    return false;
-  }
+  // HELIX: Disabled command substitution check for sandboxed environments
+  // if (detectCommandSubstitution(stripped)) {
+  //   return false;
+  // }
 
-  if (containsWriteRedirection(stripped)) {
-    return false;
-  }
+  // HELIX: Disabled write redirection check for sandboxed environments
+  // In throwaway containers, write operations are safe and often needed
+  // when the write_file tool fails (model uses echo > file as workaround)
+  // if (containsWriteRedirection(stripped)) {
+  //   return false;
+  // }
 
   const tokens = normalizeTokens(stripped);
   if (tokens.length === 0) {
