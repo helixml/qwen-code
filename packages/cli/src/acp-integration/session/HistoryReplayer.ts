@@ -32,9 +32,18 @@ export class HistoryReplayer {
    * @param records - Array of chat records to replay
    */
   async replay(records: ChatRecord[]): Promise<void> {
+    console.error(`🎬 [HISTORY REPLAYER] Replaying ${records.length} records`);
+    let replayedCount = 0;
     for (const record of records) {
+      console.error(
+        `🎬 [HISTORY REPLAYER] Replaying record ${replayedCount + 1}/${records.length}: type=${record.type}`,
+      );
       await this.replayRecord(record);
+      replayedCount++;
     }
+    console.error(
+      `✅ [HISTORY REPLAYER] Finished replaying ${replayedCount} records`,
+    );
   }
 
   /**

@@ -111,7 +111,11 @@ export class Session implements SessionContext {
    * Delegates to HistoryReplayer for consistent event emission.
    */
   async replayHistory(records: ChatRecord[]): Promise<void> {
+    console.error(
+      `🎬 [ACP REPLAY] Starting history replay with ${records.length} records`,
+    );
     await this.historyReplayer.replay(records);
+    console.error(`✅ [ACP REPLAY] History replay completed`);
   }
 
   async cancelPendingPrompt(): Promise<void> {

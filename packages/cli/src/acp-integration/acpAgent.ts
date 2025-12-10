@@ -208,9 +208,16 @@ class GeminiAgent {
   async loadSession(
     params: acp.LoadSessionRequest,
   ): Promise<acp.LoadSessionResponse> {
+    console.error(
+      `🔄 [ACP SESSION LOAD] Loading session ${params.sessionId} for cwd: ${params.cwd}`,
+    );
     const sessionService = new SessionService(params.cwd);
     const exists = await sessionService.sessionExists(params.sessionId);
+    console.error(`🔄 [ACP SESSION LOAD] Session exists check: ${exists}`);
     if (!exists) {
+      console.error(
+        `❌ [ACP SESSION LOAD] Session not found: ${params.sessionId}`,
+      );
       throw acp.RequestError.invalidParams(
         `Session not found for id: ${params.sessionId}`,
       );
@@ -225,14 +232,22 @@ class GeminiAgent {
     this.setupFileSystem(config);
 
     const sessionData = config.getResumedSessionData();
+    console.error(
+      `🔄 [ACP SESSION LOAD] Got session data: ${sessionData ? 'yes' : 'no'}, messages: ${sessionData?.conversation?.messages?.length ?? 0}`,
+    );
     if (!sessionData) {
+      console.error(`❌ [ACP SESSION LOAD] Failed to get session data`);
       throw acp.RequestError.internalError(
         `Failed to load session data for id: ${params.sessionId}`,
       );
     }
 
+    console.error(
+      `🔄 [ACP SESSION LOAD] Calling createAndStoreSession with ${sessionData.conversation?.messages?.length ?? 0} messages`,
+    );
     await this.createAndStoreSession(config, sessionData.conversation);
 
+    console.error(`✅ [ACP SESSION LOAD] Session loaded successfully`);
     return null;
   }
 
