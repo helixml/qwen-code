@@ -13,6 +13,7 @@ import type { Config } from '../config/config.js';
 import { DEFAULT_FILE_FILTERING_OPTIONS } from '../config/constants.js';
 import { ToolErrorType } from './tool-error.js';
 import { ToolDisplayNames, ToolNames } from './tool-names.js';
+import { getErrorMessage } from '../utils/errors.js';
 
 /**
  * Parameters for the LS tool
@@ -239,7 +240,7 @@ class LSToolInvocation extends BaseToolInvocation<LSToolParams, ToolResult> {
         returnDisplay: displayMessage,
       };
     } catch (error) {
-      const errorMsg = `Error listing directory: ${error instanceof Error ? error.message : String(error)}`;
+      const errorMsg = `Error listing directory: ${getErrorMessage(error)}`;
       return this.errorResult(
         errorMsg,
         'Failed to list directory.',

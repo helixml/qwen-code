@@ -334,7 +334,7 @@ class WriteFileToolInvocation extends BaseToolInvocation<
       } else if (error instanceof Error) {
         errorMsg = `Error writing to file: ${error.message}`;
       } else {
-        errorMsg = `Error writing to file: ${String(error)}`;
+        errorMsg = `Error writing to file: ${getErrorMessage(error)}`;
       }
 
       return {

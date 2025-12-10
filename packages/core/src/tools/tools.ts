@@ -6,6 +6,7 @@
 
 import type { FunctionDeclaration, Part, PartListUnion } from '@google/genai';
 import { ToolErrorType } from './tool-error.js';
+import { getErrorMessage } from '../utils/errors.js';
 import type { DiffUpdateResult } from '../ide/ide-client.js';
 import type { ShellExecutionConfig } from '../services/shellExecutionService.js';
 import { SchemaValidator } from '../utils/schemaValidator.js';
@@ -254,8 +255,7 @@ export abstract class DeclarativeTool<
     try {
       return await invocationOrError.execute(abortSignal);
     } catch (error) {
-      const errorMessage =
-        error instanceof Error ? error.message : String(error);
+      const errorMessage = getErrorMessage(error);
       return {
         llmContent: `Error: Tool call execution failed. Reason: ${errorMessage}`,
         returnDisplay: errorMessage,

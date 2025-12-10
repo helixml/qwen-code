@@ -192,8 +192,7 @@ class GlobToolInvocation extends BaseToolInvocation<
         returnDisplay: `Found ${totalFileCount} matching file(s)${truncated ? ' (truncated)' : ''}`,
       };
     } catch (error) {
-      const errorMessage =
-        error instanceof Error ? error.message : String(error);
+      const errorMessage = getErrorMessage(error);
       console.error(`GlobLogic execute Error: ${errorMessage}`, error);
       const rawError = `Error during glob search operation: ${errorMessage}`;
       return {

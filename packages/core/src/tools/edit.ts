@@ -17,7 +17,7 @@ import type {
 import { BaseDeclarativeTool, Kind, ToolConfirmationOutcome } from './tools.js';
 import { ToolErrorType } from './tool-error.js';
 import { makeRelative, shortenPath } from '../utils/paths.js';
-import { isNodeError } from '../utils/errors.js';
+import { isNodeError, getErrorMessage } from '../utils/errors.js';
 import type { Config } from '../config/config.js';
 import { ApprovalMode } from '../config/config.js';
 import { DEFAULT_DIFF_OPTIONS, getDiffStat } from './diffOptions.js';
@@ -255,7 +255,7 @@ class EditToolInvocation implements ToolInvocation<EditToolParams, ToolResult> {
       if (abortSignal.aborted) {
         throw error;
       }
-      const errorMsg = error instanceof Error ? error.message : String(error);
+      const errorMsg = getErrorMessage(error);
       console.log(`Error preparing edit: ${errorMsg}`);
       return false;
     }
@@ -343,7 +343,7 @@ class EditToolInvocation implements ToolInvocation<EditToolParams, ToolResult> {
       if (signal.aborted) {
         throw error;
       }
-      const errorMsg = error instanceof Error ? error.message : String(error);
+      const errorMsg = getErrorMessage(error);
       return {
         llmContent: `Error preparing edit: ${errorMsg}`,
         returnDisplay: `Error preparing edit: ${errorMsg}`,
@@ -439,7 +439,7 @@ class EditToolInvocation implements ToolInvocation<EditToolParams, ToolResult> {
         returnDisplay: displayResult,
       };
     } catch (error) {
-      const errorMsg = error instanceof Error ? error.message : String(error);
+      const errorMsg = getErrorMessage(error);
       return {
         llmContent: `Error executing edit: ${errorMsg}`,
         returnDisplay: `Error writing file: ${errorMsg}`,
