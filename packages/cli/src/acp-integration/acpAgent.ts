@@ -116,6 +116,10 @@ class GeminiAgent {
           audio: true,
           embeddedContext: true,
         },
+        // Advertise session/list capability (ACP protocol v0.10.0)
+        sessionCapabilities: {
+          list: {},
+        },
       },
     };
   }
@@ -241,19 +245,19 @@ class GeminiAgent {
       size: params.size,
     });
 
+    // Map to official ACP protocol v0.10.0 format:
+    // - sessions (not items)
+    // - session_id (snake_case)
+    // - title (use first prompt as title)
+    // - updated_at (ISO 8601 format)
     return {
-      items: result.items.map((item) => ({
-        sessionId: item.sessionId,
+      sessions: result.items.map((item) => ({
+        session_id: item.sessionId,
         cwd: item.cwd,
-        startTime: item.startTime,
-        mtime: item.mtime,
-        prompt: item.prompt,
-        gitBranch: item.gitBranch,
-        filePath: item.filePath,
-        messageCount: item.messageCount,
+        title: item.prompt ? item.prompt.substring(0, 100) : undefined,
+        updated_at: item.startTime,
       })),
-      nextCursor: result.nextCursor,
-      hasMore: result.hasMore,
+      next_cursor: result.nextCursor?.toString(),
     };
   }
 

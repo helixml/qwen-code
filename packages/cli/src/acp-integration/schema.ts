@@ -255,21 +255,19 @@ export const newSessionResponseSchema = z.object({
 
 export const loadSessionResponseSchema = z.null();
 
+// SessionInfo schema following official ACP protocol v0.10.0
+// See: https://agentclientprotocol.com/protocol/session-setup#listing-sessions
 export const sessionListItemSchema = z.object({
+  session_id: z.string(),
   cwd: z.string(),
-  filePath: z.string(),
-  gitBranch: z.string().optional(),
-  messageCount: z.number(),
-  mtime: z.number(),
-  prompt: z.string(),
-  sessionId: z.string(),
-  startTime: z.string(),
+  title: z.string().optional(),
+  updated_at: z.string().optional(),
 });
 
+// ListSessionsResponse schema following official ACP protocol v0.10.0
 export const listSessionsResponseSchema = z.object({
-  hasMore: z.boolean(),
-  items: z.array(sessionListItemSchema),
-  nextCursor: z.number().optional(),
+  sessions: z.array(sessionListItemSchema),
+  next_cursor: z.string().optional(),
 });
 
 export const listSessionsRequestSchema = z.object({
@@ -343,9 +341,18 @@ export const promptCapabilitiesSchema = z.object({
   image: z.boolean().optional(),
 });
 
+// SessionListCapabilities: empty object indicates session/list is supported
+export const sessionListCapabilitiesSchema = z.object({});
+
+// SessionCapabilities: advertise which session features are supported
+export const sessionCapabilitiesSchema = z.object({
+  list: sessionListCapabilitiesSchema.optional(),
+});
+
 export const agentCapabilitiesSchema = z.object({
   loadSession: z.boolean().optional(),
   promptCapabilities: promptCapabilitiesSchema.optional(),
+  sessionCapabilities: sessionCapabilitiesSchema.optional(),
 });
 
 export const authMethodSchema = z.object({
