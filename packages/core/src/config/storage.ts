@@ -24,6 +24,11 @@ export class Storage {
   }
 
   static getGlobalQwenDir(): string {
+    // Allow override via environment variable for persistent storage in sandboxes
+    const customDir = process.env['QWEN_DATA_DIR'];
+    if (customDir) {
+      return customDir;
+    }
     const homeDir = os.homedir();
     if (!homeDir) {
       return path.join(os.tmpdir(), '.qwen');
