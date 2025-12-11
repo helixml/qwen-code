@@ -861,6 +861,9 @@ export async function loadCliConfig(
   let sessionData: ResumedSessionData | undefined;
 
   if (argv.continue || argv.resume) {
+    console.error(
+      `🔧 [LOAD CLI CONFIG] Loading session, cwd: "${cwd}", resume: "${argv.resume}", continue: ${argv.continue}`,
+    );
     const sessionService = new SessionService(cwd);
     if (argv.continue) {
       sessionData = await sessionService.loadLastSession();
@@ -871,7 +874,13 @@ export async function loadCliConfig(
 
     if (argv.resume) {
       sessionId = argv.resume;
+      console.error(
+        `🔧 [LOAD CLI CONFIG] Calling sessionService.loadSession for: ${argv.resume}`,
+      );
       sessionData = await sessionService.loadSession(argv.resume);
+      console.error(
+        `🔧 [LOAD CLI CONFIG] sessionService.loadSession returned: ${sessionData ? 'data' : 'undefined'}`,
+      );
       if (!sessionData) {
         const message = `No saved session found with ID ${argv.resume}. Run \`qwen --resume\` without an ID to choose from existing sessions.`;
         console.log(message);
