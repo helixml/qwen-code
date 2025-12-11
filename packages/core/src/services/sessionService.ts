@@ -437,15 +437,31 @@ export class SessionService {
     const chatsDir = this.getChatsDir();
     const filePath = path.join(chatsDir, `${sessionId}.jsonl`);
 
+    console.error(`🔍 [SESSION LOAD] Loading session from: ${filePath}`);
+    console.error(
+      `🔍 [SESSION LOAD] Current projectHash: ${this.projectHash} (from cwd: ${this.storage.getProjectRoot()})`,
+    );
+
     const records = await this.readAllRecords(filePath);
     if (records.length === 0) {
+      console.error(`🔍 [SESSION LOAD] No records found in file`);
       return;
     }
+
+    console.error(`🔍 [SESSION LOAD] Found ${records.length} records`);
 
     // Verify this session belongs to the current project
     const firstRecord = records[0];
     const recordProjectHash = getProjectHash(firstRecord.cwd);
+    console.error(`🔍 [SESSION LOAD] Record cwd: "${firstRecord.cwd}"`);
+    console.error(`🔍 [SESSION LOAD] Record projectHash: ${recordProjectHash}`);
+    console.error(
+      `🔍 [SESSION LOAD] Hash match: ${recordProjectHash === this.projectHash}`,
+    );
     if (recordProjectHash !== this.projectHash) {
+      console.error(
+        `❌ [SESSION LOAD] Project hash mismatch - rejecting session`,
+      );
       return;
     }
 
