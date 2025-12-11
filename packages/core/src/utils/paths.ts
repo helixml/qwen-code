@@ -167,12 +167,41 @@ export function unescapePath(filePath: string): string {
 }
 
 /**
+ * Normalizes a project path for consistent hashing.
+ * - Normalizes the path (removes redundant separators, resolves . and ..)
+ * - Removes trailing slashes
+ * - Canonicalizes known bind-mount equivalents (e.g., /data/workspace -> /home/retro/work)
+ *
+ * Note: We can't use realpathSync to resolve bind mounts because two bind mounts
+ * to the same underlying filesystem are indistinguishable at the filesystem level.
+ * Instead, we must explicitly map known equivalent paths.
+ *
+ * @param projectRoot The project root path to normalize
+ * @returns The normalized path
+ */
+export function normalizeProjectPath(projectRoot: string): string {
+  let normalized = path.normalize(projectRoot).replace(/\/+$/, '');
+
+  // Canonicalize known bind-mount equivalents in the sandbox
+  // /data/workspace and /home/retro/work are bind-mounted to the same place
+  if (normalized.startsWith('/data/workspace')) {
+    normalized = normalized.replace('/data/workspace', '/home/retro/work');
+  }
+
+  return normalized;
+}
+
+/**
  * Generates a unique hash for a project based on its root path.
+ * The path is normalized before hashing to ensure consistent hashes
+ * regardless of trailing slashes or bind-mount path variations.
+ *
  * @param projectRoot The absolute path to the project's root directory.
- * @returns A SHA256 hash of the project root path.
+ * @returns A SHA256 hash of the normalized project root path.
  */
 export function getProjectHash(projectRoot: string): string {
-  return crypto.createHash('sha256').update(projectRoot).digest('hex');
+  const normalizedPath = normalizeProjectPath(projectRoot);
+  return crypto.createHash('sha256').update(normalizedPath).digest('hex');
 }
 
 /**

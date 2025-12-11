@@ -17,6 +17,7 @@ import {
 } from '@google/genai';
 import * as jsonl from '../utils/jsonl-utils.js';
 import { getGitBranch } from '../utils/gitUtils.js';
+import { normalizeProjectPath } from '../utils/paths.js';
 import type {
   ChatCompressionInfo,
   ToolCallResponseInfo,
@@ -231,7 +232,7 @@ export class ChatRecordingService {
       sessionId: this.getSessionId(),
       timestamp: new Date().toISOString(),
       type,
-      cwd: this.config.getProjectRoot(),
+      cwd: normalizeProjectPath(this.config.getProjectRoot()),
       version: this.config.getCliVersion() || 'unknown',
       gitBranch: getGitBranch(this.config.getProjectRoot()),
     };
