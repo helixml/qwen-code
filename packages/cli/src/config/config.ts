@@ -861,17 +861,7 @@ export async function loadCliConfig(
   let sessionData: ResumedSessionData | undefined;
 
   if (argv.continue || argv.resume) {
-    const debugLog = (msg: string) => {
-      const timestamp = new Date().toISOString();
-      const line = `[${timestamp}] ${msg}\n`;
-      console.error(line.trim());
-      try {
-        fs.appendFileSync('/tmp/qwen-session-debug.log', line);
-      } catch {
-        // ignore
-      }
-    };
-    debugLog(
+    console.error(
       `🔧 [LOAD CLI CONFIG] Loading session, cwd: "${cwd}", resume: "${argv.resume}", continue: ${argv.continue}`,
     );
     const sessionService = new SessionService(cwd);
@@ -884,11 +874,11 @@ export async function loadCliConfig(
 
     if (argv.resume) {
       sessionId = argv.resume;
-      debugLog(
+      console.error(
         `🔧 [LOAD CLI CONFIG] Calling sessionService.loadSession for: ${argv.resume}`,
       );
       sessionData = await sessionService.loadSession(argv.resume);
-      debugLog(
+      console.error(
         `🔧 [LOAD CLI CONFIG] sessionService.loadSession returned: ${sessionData ? 'data' : 'undefined'}`,
       );
       if (!sessionData) {
