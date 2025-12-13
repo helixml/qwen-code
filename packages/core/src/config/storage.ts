@@ -8,7 +8,6 @@ import * as path from 'node:path';
 import * as os from 'node:os';
 import * as crypto from 'node:crypto';
 import * as fs from 'node:fs';
-import { normalizeProjectPath } from '../utils/paths.js';
 
 export const QWEN_DIR = '.qwen';
 export const GOOGLE_ACCOUNTS_FILENAME = 'google_accounts.json';
@@ -74,18 +73,13 @@ export class Storage {
   }
 
   getProjectDir(): string {
-    // Normalize the path before sanitizing to handle bind-mount equivalents
-    // (e.g., /data/workspace and /home/retro/work point to same location)
-    const normalizedRoot = normalizeProjectPath(this.getProjectRoot());
-    const projectId = this.sanitizeCwd(normalizedRoot);
+    const projectId = this.sanitizeCwd(this.getProjectRoot());
     const projectsDir = path.join(Storage.getGlobalQwenDir(), PROJECT_DIR_NAME);
     return path.join(projectsDir, projectId);
   }
 
   getProjectTempDir(): string {
-    // Normalize the path before hashing to handle bind-mount equivalents
-    const normalizedRoot = normalizeProjectPath(this.getProjectRoot());
-    const hash = this.getFilePathHash(normalizedRoot);
+    const hash = this.getFilePathHash(this.getProjectRoot());
     const tempDir = Storage.getGlobalTempDir();
     return path.join(tempDir, hash);
   }
@@ -107,9 +101,7 @@ export class Storage {
   }
 
   getHistoryDir(): string {
-    // Normalize the path before hashing to handle bind-mount equivalents
-    const normalizedRoot = normalizeProjectPath(this.getProjectRoot());
-    const hash = this.getFilePathHash(normalizedRoot);
+    const hash = this.getFilePathHash(this.getProjectRoot());
     const historyDir = path.join(Storage.getGlobalQwenDir(), 'history');
     return path.join(historyDir, hash);
   }

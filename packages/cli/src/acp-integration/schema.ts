@@ -257,17 +257,18 @@ export const loadSessionResponseSchema = z.null();
 
 // SessionInfo schema following official ACP protocol v0.10.0
 // See: https://agentclientprotocol.com/protocol/session-setup#listing-sessions
+// NOTE: ACP uses camelCase for JSON keys (serde rename_all = "camelCase")
 export const sessionListItemSchema = z.object({
-  session_id: z.string(),
+  sessionId: z.string(),
   cwd: z.string(),
   title: z.string().optional(),
-  updated_at: z.string().optional(),
+  updatedAt: z.string().optional(),
 });
 
 // ListSessionsResponse schema following official ACP protocol v0.10.0
 export const listSessionsResponseSchema = z.object({
   sessions: z.array(sessionListItemSchema),
-  next_cursor: z.string().optional(),
+  nextCursor: z.string().optional(),
 });
 
 export const listSessionsRequestSchema = z.object({

@@ -261,18 +261,16 @@ class GeminiAgent {
     });
 
     // Map to official ACP protocol v0.10.0 format:
-    // - sessions (not items)
-    // - session_id (snake_case)
-    // - title (use first prompt as title)
-    // - updated_at (ISO 8601 format)
+    // - sessions array with SessionInfo objects
+    // - camelCase keys (ACP spec uses serde rename_all = "camelCase")
     return {
       sessions: result.items.map((item) => ({
-        session_id: item.sessionId,
+        sessionId: item.sessionId,
         cwd: item.cwd,
         title: item.prompt ? item.prompt.substring(0, 100) : undefined,
-        updated_at: item.startTime,
+        updatedAt: item.startTime,
       })),
-      next_cursor: result.nextCursor?.toString(),
+      nextCursor: result.nextCursor?.toString(),
     };
   }
 
