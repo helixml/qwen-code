@@ -21,6 +21,10 @@ export class HistoryReplayer {
   private readonly messageEmitter: MessageEmitter;
   private readonly toolCallEmitter: ToolCallEmitter;
 
+  // Queue of tool call IDs extracted from tool_result records
+  // Used to ensure function calls use the same IDs as their results
+  private toolCallIdQueue: string[] = [];
+
   constructor(ctx: SessionContext) {
     this.messageEmitter = new MessageEmitter(ctx);
     this.toolCallEmitter = new ToolCallEmitter(ctx);
@@ -33,6 +37,15 @@ export class HistoryReplayer {
    */
   async replay(records: ChatRecord[]): Promise<void> {
     console.error(`🎬 [HISTORY REPLAYER] Replaying ${records.length} records`);
+
+    // Pre-scan: Extract callIds from tool_result records in order
+    // This ensures function calls use the SAME IDs as their results
+    // (fixes "Tool call not found" error on resume)
+    this.toolCallIdQueue = this.extractToolCallIds(records);
+    console.error(
+      `🎬 [HISTORY REPLAYER] Pre-scanned ${this.toolCallIdQueue.length} tool call IDs`,
+    );
+
     let replayedCount = 0;
     for (const record of records) {
       console.error(
@@ -44,6 +57,21 @@ export class HistoryReplayer {
     console.error(
       `✅ [HISTORY REPLAYER] Finished replaying ${replayedCount} records`,
     );
+  }
+
+  /**
+   * Pre-scans records to extract tool call IDs from tool_result records.
+   * Returns them in order so they can be matched with function calls.
+   */
+  private extractToolCallIds(records: ChatRecord[]): string[] {
+    const ids: string[] = [];
+    for (const record of records) {
+      if (record.type === 'tool_result') {
+        const callId = record.toolCallResult?.callId ?? record.uuid;
+        ids.push(callId);
+      }
+    }
+    return ids;
   }
 
   /**
@@ -91,7 +119,19 @@ export class HistoryReplayer {
       // Function call (tool start)
       if ('functionCall' in part && part.functionCall) {
         const functionName = part.functionCall.name ?? '';
-        const callId = part.functionCall.id ?? `${functionName}-${Date.now()}`;
+
+        // Use the pre-scanned callId from the corresponding tool_result record
+        // This fixes "Tool call not found" on resume - the callId must match
+        // between tool_call (emitStart) and tool_call_update (emitResult)
+        let callId = part.functionCall.id;
+        if (!callId && this.toolCallIdQueue.length > 0) {
+          // Pop the next ID from the queue (they're in order)
+          callId = this.toolCallIdQueue.shift();
+        }
+        // Fallback to generated ID only if no pre-scanned ID available
+        if (!callId) {
+          callId = `${functionName}-${Date.now()}`;
+        }
 
         await this.toolCallEmitter.emitStart({
           toolName: functionName,
