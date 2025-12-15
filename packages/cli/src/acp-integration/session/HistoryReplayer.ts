@@ -120,17 +120,40 @@ export class HistoryReplayer {
       if ('functionCall' in part && part.functionCall) {
         const functionName = part.functionCall.name ?? '';
 
-        // Use the pre-scanned callId from the corresponding tool_result record
-        // This fixes "Tool call not found" on resume - the callId must match
-        // between tool_call (emitStart) and tool_call_update (emitResult)
-        let callId = part.functionCall.id;
-        if (!callId && this.toolCallIdQueue.length > 0) {
+        // CRITICAL: Always use the callId from the pre-scanned tool_result queue.
+        // This ensures the callId matches between tool_call (emitStart) and
+        // tool_call_update (emitResult), which prevents "Tool call not found" errors.
+        //
+        // The queue is populated in order from tool_result records, and we pop
+        // one ID for each functionCall we encounter (they should be 1:1).
+        //
+        // Bug fix: Previously, if functionCall.id was present, we used it without
+        // popping from the queue. This caused all subsequent callIds to be wrong
+        // because the queue got out of sync with the message stream.
+        let callId: string | undefined;
+
+        if (this.toolCallIdQueue.length > 0) {
           // Pop the next ID from the queue (they're in order)
           callId = this.toolCallIdQueue.shift();
+
+          // Log if there's a mismatch (for debugging, but we always use queue ID)
+          if (part.functionCall.id && part.functionCall.id !== callId) {
+            console.error(
+              `🔧 [HISTORY REPLAYER] callId mismatch for ${functionName}: ` +
+                `message has ${part.functionCall.id}, using queue ID ${callId}`,
+            );
+          }
+        } else if (part.functionCall.id) {
+          // Fallback: use the ID from the functionCall if queue is empty
+          callId = part.functionCall.id;
         }
-        // Fallback to generated ID only if no pre-scanned ID available
+
+        // Last resort: generate an ID (shouldn't happen in well-formed history)
         if (!callId) {
           callId = `${functionName}-${Date.now()}`;
+          console.error(
+            `⚠️ [HISTORY REPLAYER] No callId available for ${functionName}, generated: ${callId}`,
+          );
         }
 
         await this.toolCallEmitter.emitStart({

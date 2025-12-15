@@ -340,22 +340,31 @@ class GeminiAgent {
     // setImmediate runs after the current event loop iteration completes,
     // which means the response will be sent first, then these callbacks fire.
     // Flow: loadSession response sent → Zed creates thread → setImmediate fires → history replays
+    //
+    // IMPORTANT: Use a SINGLE setImmediate to ensure sequential execution.
+    // Multiple setImmediate calls can race with each other, causing interleaved
+    // or out-of-order updates that confuse Zed's state management.
 
     setImmediate(async () => {
-      await session.sendAvailableCommandsUpdate();
-    });
+      try {
+        // First, send available commands (quick)
+        await session.sendAvailableCommandsUpdate();
 
-    if (conversation && conversation.messages) {
-      // Schedule history replay AFTER response is returned
-      // DO NOT await here - that would block the response!
-      setImmediate(async () => {
+        // Then, replay history if present (may take longer)
+        if (conversation && conversation.messages) {
+          console.error(
+            `🎬 [ACP SESSION LOAD] Replaying ${conversation.messages.length} messages (delayed until after response)`,
+          );
+          await session.replayHistory(conversation.messages);
+          console.error(`🎬 [ACP SESSION LOAD] History replay complete`);
+        }
+      } catch (error) {
         console.error(
-          `🎬 [ACP SESSION LOAD] Replaying ${conversation.messages.length} messages (delayed until after response)`,
+          `❌ [ACP SESSION LOAD] Error during deferred updates:`,
+          error,
         );
-        await session.replayHistory(conversation.messages);
-        console.error(`🎬 [ACP SESSION LOAD] History replay complete`);
-      });
-    }
+      }
+    });
 
     return session;
   }
