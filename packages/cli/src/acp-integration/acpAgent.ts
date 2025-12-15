@@ -333,12 +333,28 @@ class GeminiAgent {
     );
     this.sessions.set(sessionId, session);
 
-    setTimeout(async () => {
+    // CRITICAL: Schedule updates to run AFTER the loadSession response is returned
+    // Zed only creates the AcpThread AFTER receiving the response, so any
+    // notifications sent during the request are lost.
+    //
+    // setImmediate runs after the current event loop iteration completes,
+    // which means the response will be sent first, then these callbacks fire.
+    // Flow: loadSession response sent → Zed creates thread → setImmediate fires → history replays
+
+    setImmediate(async () => {
       await session.sendAvailableCommandsUpdate();
-    }, 0);
+    });
 
     if (conversation && conversation.messages) {
-      await session.replayHistory(conversation.messages);
+      // Schedule history replay AFTER response is returned
+      // DO NOT await here - that would block the response!
+      setImmediate(async () => {
+        console.error(
+          `🎬 [ACP SESSION LOAD] Replaying ${conversation.messages.length} messages (delayed until after response)`,
+        );
+        await session.replayHistory(conversation.messages);
+        console.error(`🎬 [ACP SESSION LOAD] History replay complete`);
+      });
     }
 
     return session;
