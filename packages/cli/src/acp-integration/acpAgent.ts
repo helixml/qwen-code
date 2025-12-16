@@ -158,12 +158,68 @@ class GeminiAgent {
   ): Promise<Config> {
     const mergedMcpServers = { ...this.settings.merged.mcpServers };
 
-    for (const { command, args, env: rawEnv, name } of mcpServers) {
-      const env: Record<string, string> = {};
-      for (const { name: envName, value } of rawEnv) {
-        env[envName] = value;
+    for (const server of mcpServers) {
+      // ACP MCP servers use a discriminated union with "type" field:
+      // - type: "http" → streamable HTTP transport (url goes to httpUrl)
+      // - type: "sse" → SSE transport (url goes to url)
+      // - no type → stdio transport (command, args, env)
+      // See: https://agentclientprotocol.com/protocol/draft/schema#mcpserver
+
+      // Check if this is a tagged variant (has "type" field)
+      const serverType =
+        'type' in server ? (server as { type: string }).type : undefined;
+
+      if (serverType === 'http' || serverType === 'sse') {
+        // HTTP or SSE transport
+        const httpServer = server as {
+          name: string;
+          url: string;
+          headers: Array<{ name: string; value: string }>;
+        };
+
+        // Convert headers array to Record<string, string>
+        const headers: Record<string, string> = {};
+        for (const { name: headerName, value } of httpServer.headers) {
+          headers[headerName] = value;
+        }
+
+        // MCPServerConfig: url is for SSE, httpUrl is for streamable HTTP
+        mergedMcpServers[httpServer.name] = new MCPServerConfig(
+          undefined, // command (not used)
+          undefined, // args (not used)
+          undefined, // env (not used)
+          undefined, // cwd (not used)
+          serverType === 'sse' ? httpServer.url : undefined, // SSE transport URL
+          serverType === 'http' ? httpServer.url : undefined, // Streamable HTTP transport URL
+          Object.keys(headers).length > 0 ? headers : undefined,
+        );
+      } else {
+        // Stdio transport (untagged)
+        const stdioServer = server as {
+          name: string;
+          command: string;
+          args?: string[];
+          env?: Array<{ name: string; value: string }>;
+        };
+
+        // Convert env array to Record<string, string>
+        const env: Record<string, string> = {};
+        if (stdioServer.env) {
+          for (const { name: envName, value } of stdioServer.env) {
+            env[envName] = value;
+          }
+        }
+
+        mergedMcpServers[stdioServer.name] = new MCPServerConfig(
+          stdioServer.command,
+          stdioServer.args,
+          Object.keys(env).length > 0 ? env : undefined,
+          cwd,
+          undefined, // url (not used)
+          undefined, // httpUrl (not used)
+          undefined, // headers (not used)
+        );
       }
-      mergedMcpServers[name] = new MCPServerConfig(command, args, env, cwd);
     }
 
     const settings = { ...this.settings.merged, mcpServers: mergedMcpServers };

@@ -83,6 +83,8 @@ export type FileSystemCapability = z.infer<typeof fileSystemCapabilitySchema>;
 
 export type EnvVariable = z.infer<typeof envVariableSchema>;
 
+export type HttpHeader = z.infer<typeof httpHeaderSchema>;
+
 export type McpServer = z.infer<typeof mcpServerSchema>;
 
 export type AgentCapabilities = z.infer<typeof agentCapabilitiesSchema>;
@@ -329,12 +331,48 @@ export const envVariableSchema = z.object({
   value: z.string(),
 });
 
-export const mcpServerSchema = z.object({
-  args: z.array(z.string()),
-  command: z.string(),
-  env: z.array(envVariableSchema),
+// HTTP header for MCP servers
+// See: https://agentclientprotocol.com/protocol/draft/schema#httpheader
+export const httpHeaderSchema = z.object({
   name: z.string(),
+  value: z.string(),
 });
+
+// Stdio MCP server configuration (untagged in ACP spec)
+// See: https://agentclientprotocol.com/protocol/draft/schema#mcpserverstdio
+export const mcpServerStdioSchema = z.object({
+  name: z.string(),
+  command: z.string(),
+  args: z.array(z.string()).optional(),
+  env: z.array(envVariableSchema).optional(),
+});
+
+// HTTP MCP server configuration (tagged with type: "http")
+// See: https://agentclientprotocol.com/protocol/draft/schema#mcpserverhttp
+export const mcpServerHttpSchema = z.object({
+  type: z.literal('http'),
+  name: z.string(),
+  url: z.string(),
+  headers: z.array(httpHeaderSchema),
+});
+
+// SSE MCP server configuration (tagged with type: "sse")
+// See: https://agentclientprotocol.com/protocol/draft/schema#mcpserversse
+export const mcpServerSseSchema = z.object({
+  type: z.literal('sse'),
+  name: z.string(),
+  url: z.string(),
+  headers: z.array(httpHeaderSchema),
+});
+
+// MCP server configuration - discriminated union matching ACP spec.
+// HTTP and SSE use tagged format with "type" field.
+// Stdio is untagged (no "type" field) - must be checked last in the union.
+export const mcpServerSchema = z.union([
+  mcpServerHttpSchema,
+  mcpServerSseSchema,
+  mcpServerStdioSchema,
+]);
 
 export const promptCapabilitiesSchema = z.object({
   audio: z.boolean().optional(),
