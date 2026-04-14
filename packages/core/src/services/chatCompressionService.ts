@@ -9,12 +9,17 @@ import type { Config } from '../config/config.js';
 import type { GeminiChat } from '../core/geminiChat.js';
 import { type ChatCompressionInfo, CompressionStatus } from '../core/turn.js';
 import { uiTelemetryService } from '../telemetry/uiTelemetry.js';
-import { tokenLimit } from '../core/tokenLimits.js';
+import { DEFAULT_TOKEN_LIMIT } from '../core/tokenLimits.js';
 import { getCompressionPrompt } from '../core/prompts.js';
 import { getResponseText } from '../utils/partUtils.js';
 import { logChatCompression } from '../telemetry/loggers.js';
 import { makeChatCompressionEvent } from '../telemetry/types.js';
-import { getInitialChatHistory } from '../utils/environmentContext.js';
+import type { PermissionMode } from '../hooks/types.js';
+import {
+  SessionStartSource,
+  PreCompactTrigger,
+  PostCompactTrigger,
+} from '../hooks/types.js';
 
 /**
  * Threshold for compression token count as a fraction of the model's token limit.
@@ -27,6 +32,13 @@ export const COMPRESSION_TOKEN_THRESHOLD = 0.7;
  * means that only the last 30% of the chat history will be kept after compression.
  */
 export const COMPRESSION_PRESERVE_THRESHOLD = 0.3;
+
+/**
+ * Minimum fraction of history (by character count) that must be compressible
+ * to proceed with a compression API call. Prevents futile calls where the
+ * model receives almost no context and generates a useless summary.
+ */
+export const MIN_COMPRESSION_FRACTION = 0.05;
 
 /**
  * Returns the index of the oldest item to keep when compressing. May return
@@ -71,8 +83,15 @@ export function findCompressSplitPoint(
   ) {
     return contents.length;
   }
+  // Also safe to compress everything if the last message completes a tool call
+  // sequence (all function calls have matching responses).
+  if (
+    lastContent?.role === 'user' &&
+    lastContent?.parts?.some((part) => !!part.functionResponse)
+  ) {
+    return contents.length;
+  }
 
-  // Can't compress everything so just compress at last splitpoint.
   return lastSplitPoint;
 }
 
@@ -84,6 +103,7 @@ export class ChatCompressionService {
     model: string,
     config: Config,
     hasFailedCompressionAttempt: boolean,
+    signal?: AbortSignal,
   ): Promise<{ newHistory: Content[] | null; info: ChatCompressionInfo }> {
     const curatedHistory = chat.getHistory(true);
     const threshold =
@@ -110,7 +130,10 @@ export class ChatCompressionService {
 
     // Don't compress if not forced and we are under the limit.
     if (!force) {
-      if (originalTokenCount < threshold * tokenLimit(model)) {
+      const contextLimit =
+        config.getContentGeneratorConfig()?.contextWindowSize ??
+        DEFAULT_TOKEN_LIMIT;
+      if (originalTokenCount < threshold * contextLimit) {
         return {
           newHistory: null,
           info: {
@@ -122,15 +145,73 @@ export class ChatCompressionService {
       }
     }
 
+    // Fire PreCompact hook before compression begins
+    const hookSystem = config.getHookSystem();
+    if (hookSystem) {
+      const trigger = force ? PreCompactTrigger.Manual : PreCompactTrigger.Auto;
+      try {
+        await hookSystem.firePreCompactEvent(trigger, '', signal);
+      } catch (err) {
+        config.getDebugLogger().warn(`PreCompact hook failed: ${err}`);
+      }
+    }
+
+    // For manual /compress (force=true), if the last message is an orphaned model
+    // funcCall (agent interrupted/crashed before the response arrived), strip it
+    // before computing the split point. After stripping, the history ends cleanly
+    // (typically with a user funcResponse) and findCompressSplitPoint handles it
+    // through its normal logic — no special-casing needed.
+    //
+    // auto-compress (force=false) must NOT strip: it fires inside
+    // sendMessageStream() before the matching funcResponse is pushed onto the
+    // history, so the trailing funcCall is still active, not orphaned.
+    const lastMessage = curatedHistory[curatedHistory.length - 1];
+    const hasOrphanedFuncCall =
+      force &&
+      lastMessage?.role === 'model' &&
+      lastMessage.parts?.some((p) => !!p.functionCall);
+    const historyForSplit = hasOrphanedFuncCall
+      ? curatedHistory.slice(0, -1)
+      : curatedHistory;
+
     const splitPoint = findCompressSplitPoint(
-      curatedHistory,
+      historyForSplit,
       1 - COMPRESSION_PRESERVE_THRESHOLD,
     );
 
-    const historyToCompress = curatedHistory.slice(0, splitPoint);
-    const historyToKeep = curatedHistory.slice(splitPoint);
+    const historyToCompress = historyForSplit.slice(0, splitPoint);
+    const historyToKeep = historyForSplit.slice(splitPoint);
 
     if (historyToCompress.length === 0) {
+      return {
+        newHistory: null,
+        info: {
+          originalTokenCount,
+          newTokenCount: originalTokenCount,
+          compressionStatus: CompressionStatus.NOOP,
+        },
+      };
+    }
+
+    // Guard: if historyToCompress is too small relative to the total history,
+    // skip compression. This prevents futile API calls where the model receives
+    // almost no context and generates a useless "summary" that inflates tokens.
+    //
+    // Note: findCompressSplitPoint already computes charCounts internally but
+    // returns only the split index. We intentionally recompute here to keep
+    // the function signature simple; this is a minor, acceptable duplication.
+    const compressCharCount = historyToCompress.reduce(
+      (sum, c) => sum + JSON.stringify(c).length,
+      0,
+    );
+    const totalCharCount = historyForSplit.reduce(
+      (sum, c) => sum + JSON.stringify(c).length,
+      0,
+    );
+    if (
+      totalCharCount > 0 &&
+      compressCharCount / totalCharCount < MIN_COMPRESSION_FRACTION
+    ) {
       return {
         newHistory: null,
         info: {
@@ -163,9 +244,25 @@ export class ChatCompressionService {
     );
     const summary = getResponseText(summaryResponse) ?? '';
     const isSummaryEmpty = !summary || summary.trim().length === 0;
+    const compressionUsageMetadata = summaryResponse.usageMetadata;
+    const compressionInputTokenCount =
+      compressionUsageMetadata?.promptTokenCount;
+    let compressionOutputTokenCount =
+      compressionUsageMetadata?.candidatesTokenCount;
+    if (
+      compressionOutputTokenCount === undefined &&
+      typeof compressionUsageMetadata?.totalTokenCount === 'number' &&
+      typeof compressionInputTokenCount === 'number'
+    ) {
+      compressionOutputTokenCount = Math.max(
+        0,
+        compressionUsageMetadata.totalTokenCount - compressionInputTokenCount,
+      );
+    }
 
     let newTokenCount = originalTokenCount;
     let extraHistory: Content[] = [];
+    let canCalculateNewTokenCount = false;
 
     if (!isSummaryEmpty) {
       extraHistory = [
@@ -180,16 +277,26 @@ export class ChatCompressionService {
         ...historyToKeep,
       ];
 
-      // Use a shared utility to construct the initial history for an accurate token count.
-      const fullNewHistory = await getInitialChatHistory(config, extraHistory);
-
-      // Estimate token count 1 token ≈ 4 characters
-      newTokenCount = Math.floor(
-        fullNewHistory.reduce(
-          (total, content) => total + JSON.stringify(content).length,
+      // Best-effort token math using *only* model-reported token counts.
+      //
+      // Note: compressionInputTokenCount includes the compression prompt and
+      // the extra "reason in your scratchpad" instruction(approx. 1000 tokens), and
+      // compressionOutputTokenCount may include non-persisted tokens (thoughts).
+      // We accept these inaccuracies to avoid local token estimation.
+      if (
+        typeof compressionInputTokenCount === 'number' &&
+        compressionInputTokenCount > 0 &&
+        typeof compressionOutputTokenCount === 'number' &&
+        compressionOutputTokenCount > 0
+      ) {
+        canCalculateNewTokenCount = true;
+        newTokenCount = Math.max(
           0,
-        ) / 4,
-      );
+          originalTokenCount -
+            (compressionInputTokenCount - 1000) +
+            compressionOutputTokenCount,
+        );
+      }
     }
 
     logChatCompression(
@@ -197,6 +304,8 @@ export class ChatCompressionService {
       makeChatCompressionEvent({
         tokens_before: originalTokenCount,
         tokens_after: newTokenCount,
+        compression_input_token_count: compressionInputTokenCount,
+        compression_output_token_count: compressionOutputTokenCount,
       }),
     );
 
@@ -207,6 +316,16 @@ export class ChatCompressionService {
           originalTokenCount,
           newTokenCount: originalTokenCount,
           compressionStatus: CompressionStatus.COMPRESSION_FAILED_EMPTY_SUMMARY,
+        },
+      };
+    } else if (!canCalculateNewTokenCount) {
+      return {
+        newHistory: null,
+        info: {
+          originalTokenCount,
+          newTokenCount: originalTokenCount,
+          compressionStatus:
+            CompressionStatus.COMPRESSION_FAILED_TOKEN_COUNT_ERROR,
         },
       };
     } else if (newTokenCount > originalTokenCount) {
@@ -221,6 +340,37 @@ export class ChatCompressionService {
       };
     } else {
       uiTelemetryService.setLastPromptTokenCount(newTokenCount);
+
+      // Fire SessionStart event after successful compression
+      try {
+        const permissionMode = String(
+          config.getApprovalMode(),
+        ) as PermissionMode;
+        await config
+          .getHookSystem()
+          ?.fireSessionStartEvent(
+            SessionStartSource.Compact,
+            model ?? '',
+            permissionMode,
+            undefined,
+            signal,
+          );
+      } catch (err) {
+        config.getDebugLogger().warn(`SessionStart hook failed: ${err}`);
+      }
+
+      // Fire PostCompact event after successful compression
+      try {
+        const postCompactTrigger = force
+          ? PostCompactTrigger.Manual
+          : PostCompactTrigger.Auto;
+        await config
+          .getHookSystem()
+          ?.firePostCompactEvent(postCompactTrigger, summary, signal);
+      } catch (err) {
+        config.getDebugLogger().warn(`PostCompact hook failed: ${err}`);
+      }
+
       return {
         newHistory: extraHistory,
         info: {

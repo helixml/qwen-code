@@ -11,29 +11,40 @@ import {
   parseAndFormatApiError,
   FatalTurnLimitedError,
   FatalCancellationError,
+  ToolErrorType,
+  createDebugLogger,
 } from '@qwen-code/qwen-code-core';
+import { writeStderrLine } from './stdioHelpers.js';
+
+const debugLogger = createDebugLogger('CLI_ERRORS');
 
 export function getErrorMessage(error: unknown): string {
   if (error instanceof Error) {
     return error.message;
   }
-  if (error && typeof error === 'object') {
-    // Handle Node.js errno errors (EACCES, ENOENT, etc.)
-    if ('code' in error && 'syscall' in error && 'path' in error) {
-      const err = error as { code: string; syscall: string; path: string; errno?: number };
-      return `${err.code}: ${err.syscall} failed for ${err.path}`;
-    }
-    // Handle objects with message property
-    if ('message' in error && typeof error.message === 'string') {
-      return error.message;
-    }
-    // Fall back to JSON serialization for other objects
+
+  // Handle objects with message property (error-like objects)
+  if (
+    error !== null &&
+    typeof error === 'object' &&
+    'message' in error &&
+    typeof (error as { message: unknown }).message === 'string'
+  ) {
+    return (error as { message: string }).message;
+  }
+
+  // Handle plain objects by stringifying them
+  if (error !== null && typeof error === 'object') {
     try {
-      return JSON.stringify(error);
+      const stringified = JSON.stringify(error);
+      // JSON.stringify can return undefined for objects with toJSON() returning undefined
+      return stringified ?? String(error);
     } catch {
-      return '[Error object could not be serialized]';
+      // If JSON.stringify fails (circular reference, etc.), fall back to String
+      return String(error);
     }
   }
+
   return String(error);
 }
 
@@ -94,10 +105,10 @@ export function handleError(
       errorCode,
     );
 
-    console.error(formattedError);
+    writeStderrLine(formattedError);
     process.exit(getNumericExitCode(errorCode));
   } else {
-    console.error(errorMessage);
+    writeStderrLine(errorMessage);
     throw error;
   }
 }
@@ -119,15 +130,26 @@ export function handleToolError(
   toolName: string,
   toolError: Error,
   config: Config,
-  _errorCode?: string | number,
+  errorCode?: string | number,
   resultDisplay?: string,
 ): void {
-  // Always just log to stderr; JSON/streaming formatting happens in the tool_result block elsewhere
-  if (config.getDebugMode()) {
-    console.error(
-      `Error executing tool ${toolName}: ${resultDisplay || toolError.message}`,
-    );
+  // Check if this is a permission denied error in non-interactive mode
+  const isExecutionDenied = errorCode === ToolErrorType.EXECUTION_DENIED;
+  const isNonInteractive = !config.isInteractive();
+  const isTextMode = config.getOutputFormat() === OutputFormat.TEXT;
+
+  // Show warning for permission denied errors in non-interactive text mode
+  if (isExecutionDenied && isNonInteractive && isTextMode) {
+    const warningMessage =
+      `Warning: Tool "${toolName}" requires user approval but cannot execute in non-interactive mode.\n` +
+      `To enable automatic tool execution, use the -y flag (YOLO mode):\n` +
+      `Example: qwen -p 'your prompt' -y\n\n`;
+    process.stderr.write(warningMessage);
   }
+
+  debugLogger.error(
+    `Error executing tool ${toolName}: ${resultDisplay || toolError.message}`,
+  );
 }
 
 /**
@@ -143,10 +165,10 @@ export function handleCancellationError(config: Config): never {
       cancellationError.exitCode,
     );
 
-    console.error(formattedError);
+    writeStderrLine(formattedError);
     process.exit(cancellationError.exitCode);
   } else {
-    console.error(cancellationError.message);
+    writeStderrLine(cancellationError.message);
     process.exit(cancellationError.exitCode);
   }
 }
@@ -166,10 +188,10 @@ export function handleMaxTurnsExceededError(config: Config): never {
       maxTurnsError.exitCode,
     );
 
-    console.error(formattedError);
+    writeStderrLine(formattedError);
     process.exit(maxTurnsError.exitCode);
   } else {
-    console.error(maxTurnsError.message);
+    writeStderrLine(maxTurnsError.message);
     process.exit(maxTurnsError.exitCode);
   }
 }

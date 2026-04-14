@@ -6,6 +6,7 @@
 
 // Node built-ins
 import type { EventEmitter } from 'node:events';
+import * as fs from 'node:fs';
 import * as path from 'node:path';
 import process from 'node:process';
 
@@ -17,10 +18,12 @@ import type {
   ContentGenerator,
   ContentGeneratorConfig,
 } from '../core/contentGenerator.js';
-import type { FallbackModelHandler } from '../fallback/types.js';
+import type { ContentGeneratorConfigSources } from '../core/contentGenerator.js';
 import type { MCPOAuthConfig } from '../mcp/oauth-provider.js';
 import type { ShellExecutionConfig } from '../services/shellExecutionService.js';
 import type { AnyToolInvocation } from '../tools/tools.js';
+import type { ArenaManager } from '../agents/arena/ArenaManager.js';
+import { ArenaAgentClient } from '../agents/arena/ArenaAgentClient.js';
 
 // Core
 import { BaseLlmClient } from '../core/baseLlmClient.js';
@@ -28,19 +31,21 @@ import { GeminiClient } from '../core/client.js';
 import {
   AuthType,
   createContentGenerator,
-  createContentGeneratorConfig,
+  resolveContentGeneratorConfigWithSources,
 } from '../core/contentGenerator.js';
-import { tokenLimit } from '../core/tokenLimits.js';
 
 // Services
 import { FileDiscoveryService } from '../services/fileDiscoveryService.js';
 import {
   type FileSystemService,
   StandardFileSystemService,
+  type FileEncodingType,
 } from '../services/fileSystemService.js';
 import { GitService } from '../services/gitService.js';
+import { CronScheduler } from '../services/cronScheduler.js';
 
 // Tools
+import { AskUserQuestionTool } from '../tools/askUserQuestion.js';
 import { EditTool } from '../tools/edit.js';
 import { ExitPlanModeTool } from '../tools/exitPlanMode.js';
 import { GlobTool } from '../tools/glob.js';
@@ -49,22 +54,28 @@ import { LSTool } from '../tools/ls.js';
 import type { SendSdkMcpMessage } from '../tools/mcp-client.js';
 import { MemoryTool, setGeminiMdFilename } from '../tools/memoryTool.js';
 import { ReadFileTool } from '../tools/read-file.js';
-import { ReadManyFilesTool } from '../tools/read-many-files.js';
 import { canUseRipgrep } from '../utils/ripgrepUtils.js';
 import { RipGrepTool } from '../tools/ripGrep.js';
 import { ShellTool } from '../tools/shell.js';
-import { SmartEditTool } from '../tools/smart-edit.js';
-import { TaskTool } from '../tools/task.js';
+import { SkillTool } from '../tools/skill.js';
+import { AgentTool } from '../tools/agent.js';
 import { TodoWriteTool } from '../tools/todoWrite.js';
 import { ToolRegistry } from '../tools/tool-registry.js';
 import { WebFetchTool } from '../tools/web-fetch.js';
 import { WebSearchTool } from '../tools/web-search/index.js';
 import { WriteFileTool } from '../tools/write-file.js';
+import { LspTool } from '../tools/lsp.js';
+import { CronCreateTool } from '../tools/cron-create.js';
+import { CronListTool } from '../tools/cron-list.js';
+import { CronDeleteTool } from '../tools/cron-delete.js';
+import type { LspClient } from '../lsp/types.js';
 
 // Other modules
 import { ideContextStore } from '../ide/ideContext.js';
 import { InputFormat, OutputFormat } from '../output/types.js';
 import { PromptRegistry } from '../prompts/prompt-registry.js';
+import { SkillManager } from '../skills/skill-manager.js';
+import { PermissionManager } from '../permissions/permission-manager.js';
 import { SubagentManager } from '../subagents/subagent-manager.js';
 import type { SubagentConfig } from '../subagents/types.js';
 import {
@@ -76,15 +87,33 @@ import {
   RipgrepFallbackEvent,
   StartSessionEvent,
   type TelemetryTarget,
-  uiTelemetryService,
 } from '../telemetry/index.js';
+import {
+  ExtensionManager,
+  type Extension,
+} from '../extension/extensionManager.js';
+import { HookSystem, createHookOutput } from '../hooks/index.js';
+import { MessageBus } from '../confirmation-bus/message-bus.js';
+import {
+  MessageBusType,
+  type HookExecutionRequest,
+  type HookExecutionResponse,
+} from '../confirmation-bus/types.js';
+import {
+  PermissionMode,
+  NotificationType,
+  type PermissionSuggestion,
+} from '../hooks/types.js';
+import { fireNotificationHook } from '../core/toolHookTriggers.js';
 
 // Utils
 import { shouldAttemptBrowserLaunch } from '../utils/browser.js';
 import { FileExclusions } from '../utils/ignorePatterns.js';
+import { shouldDefaultToNodePty } from '../utils/shell-utils.js';
 import { WorkspaceContext } from '../utils/workspaceContext.js';
-import { isToolEnabled, type ToolName } from '../utils/tool-utils.js';
+import { type ToolName } from '../utils/tool-utils.js';
 import { getErrorMessage } from '../utils/errors.js';
+import { normalizeProxyUrl } from '../utils/proxyUtils.js';
 
 // Local config modules
 import type { FileFilteringOptions } from './constants.js';
@@ -92,15 +121,28 @@ import {
   DEFAULT_FILE_FILTERING_OPTIONS,
   DEFAULT_MEMORY_FILE_FILTERING_OPTIONS,
 } from './constants.js';
-import { DEFAULT_QWEN_EMBEDDING_MODEL, DEFAULT_QWEN_MODEL } from './models.js';
+import { DEFAULT_QWEN_EMBEDDING_MODEL } from './models.js';
 import { Storage } from './storage.js';
-import { DEFAULT_DASHSCOPE_BASE_URL } from '../core/openaiContentGenerator/constants.js';
 import { ChatRecordingService } from '../services/chatRecordingService.js';
 import {
   SessionService,
   type ResumedSessionData,
 } from '../services/sessionService.js';
 import { randomUUID } from 'node:crypto';
+import { loadServerHierarchicalMemory } from '../utils/memoryDiscovery.js';
+import {
+  createDebugLogger,
+  setDebugLogSession,
+  type DebugLogger,
+} from '../utils/debugLogger.js';
+
+import {
+  ModelsConfig,
+  type ModelProvidersConfig,
+  type AvailableModel,
+  type RuntimeModelSnapshot,
+} from '../models/index.js';
+import type { ClaudeMarketplaceConfig } from '../extension/claude-converter.js';
 
 // Re-export types
 export type { AnyToolInvocation, FileFilteringOptions, MCPOAuthConfig };
@@ -155,7 +197,7 @@ export const APPROVAL_MODE_INFO: Record<ApprovalMode, ApprovalModeInfo> = {
 };
 
 export interface AccessibilitySettings {
-  disableLoadingPhrases?: boolean;
+  enableLoadingPhrases?: boolean;
   screenReader?: boolean;
 }
 
@@ -167,8 +209,17 @@ export interface ChatCompressionSettings {
   contextPercentageThreshold?: number;
 }
 
-export interface SummarizeToolOutputSettings {
-  tokenBudget?: number;
+/**
+ * Settings for clearing stale context after idle periods.
+ * Threshold values of -1 mean "never clear" (disabled).
+ */
+export interface ClearContextOnIdleSettings {
+  /** Minutes idle before clearing old thinking blocks. Default 5. Use -1 to disable. */
+  thinkingThresholdMinutes?: number;
+  /** Minutes idle before clearing old tool results. Default 60. Use -1 to disable. */
+  toolResultsThresholdMinutes?: number;
+  /** Number of most-recent tool results to preserve. Default 5. */
+  toolResultsNumToKeep?: number;
 }
 
 export interface TelemetrySettings {
@@ -191,20 +242,19 @@ export interface GitCoAuthorSettings {
   email?: string;
 }
 
-export interface GeminiCLIExtension {
-  name: string;
-  version: string;
-  isActive: boolean;
-  path: string;
-  installMetadata?: ExtensionInstallMetadata;
-}
+export type ExtensionOriginSource = 'QwenCode' | 'Claude' | 'Gemini';
 
 export interface ExtensionInstallMetadata {
   source: string;
-  type: 'git' | 'local' | 'link' | 'github-release';
-  releaseTag?: string; // Only present for github-release installs.
+  type: 'git' | 'local' | 'link' | 'github-release' | 'npm';
+  originSource?: ExtensionOriginSource;
+  releaseTag?: string; // Only present for github-release and npm installs.
+  registryUrl?: string; // Only present for npm installs.
   ref?: string;
   autoUpdate?: boolean;
+  allowPreRelease?: boolean;
+  marketplaceConfig?: ClaudeMarketplaceConfig;
+  pluginName?: string;
 }
 
 export const DEFAULT_TRUNCATE_TOOL_OUTPUT_THRESHOLD = 25_000;
@@ -263,6 +313,26 @@ export interface SandboxConfig {
   image: string;
 }
 
+/**
+ * Settings shared across multi-agent collaboration features
+ * (Arena, Team, Swarm).
+ */
+export interface AgentsCollabSettings {
+  /** Display mode for multi-agent sessions ('in-process' | 'tmux' | 'iterm2') */
+  displayMode?: string;
+  /** Arena-specific settings */
+  arena?: {
+    /** Custom base directory for Arena worktrees (default: ~/.qwen/arena) */
+    worktreeBaseDir?: string;
+    /** Preserve worktrees and state files after session ends */
+    preserveArtifacts?: boolean;
+    /** Maximum rounds (turns) per agent. No limit if unset. */
+    maxRoundsPerAgent?: number;
+    /** Total timeout in seconds for the Arena session. No limit if unset. */
+    timeoutSeconds?: number;
+  };
+}
+
 export interface ConfigParameters {
   sessionId?: string;
   sessionData?: ResumedSessionData;
@@ -272,28 +342,38 @@ export interface ConfigParameters {
   debugMode: boolean;
   includePartialMessages?: boolean;
   question?: string;
-  fullContext?: boolean;
+  systemPrompt?: string;
+  appendSystemPrompt?: string;
   coreTools?: string[];
   allowedTools?: string[];
   excludeTools?: string[];
+  /** Merged permission rules from all sources (settings + CLI args). */
+  permissions?: {
+    allow?: string[];
+    ask?: string[];
+    deny?: string[];
+  };
   toolDiscoveryCommand?: string;
   toolCallCommand?: string;
   mcpServerCommand?: string;
   mcpServers?: Record<string, MCPServerConfig>;
+  lsp?: {
+    enabled?: boolean;
+  };
+  lspClient?: LspClient;
   userMemory?: string;
   geminiMdFileCount?: number;
   approvalMode?: ApprovalMode;
-  showMemoryUsage?: boolean;
   contextFileName?: string | string[];
   accessibility?: AccessibilitySettings;
   telemetry?: TelemetrySettings;
-  gitCoAuthor?: GitCoAuthorSettings;
+  gitCoAuthor?: boolean;
   usageStatisticsEnabled?: boolean;
   fileFiltering?: {
     respectGitIgnore?: boolean;
     respectQwenIgnore?: boolean;
     enableRecursiveFileSearch?: boolean;
-    disableFuzzySearch?: boolean;
+    enableFuzzySearch?: boolean;
   };
   checkpointing?: boolean;
   proxy?: string;
@@ -302,22 +382,31 @@ export interface ConfigParameters {
   includeDirectories?: string[];
   bugCommand?: BugCommandSettings;
   model?: string;
-  extensionContextFilePaths?: string[];
+  outputLanguageFilePath?: string;
   maxSessionTurns?: number;
+  clearContextOnIdle?: ClearContextOnIdleSettings;
   sessionTokenLimit?: number;
   experimentalZedIntegration?: boolean;
+  cronEnabled?: boolean;
   listExtensions?: boolean;
-  extensions?: GeminiCLIExtension[];
-  blockedMcpServers?: Array<{ name: string; extensionName: string }>;
+  overrideExtensions?: string[];
+  allowedMcpServers?: string[];
+  excludedMcpServers?: string[];
   noBrowser?: boolean;
-  summarizeToolOutput?: Record<string, SummarizeToolOutputSettings>;
   folderTrustFeature?: boolean;
   folderTrust?: boolean;
   ideMode?: boolean;
   authType?: AuthType;
   generationConfig?: Partial<ContentGeneratorConfig>;
+  /**
+   * Optional source map for generationConfig fields (e.g. CLI/env/settings attribution).
+   * This is used to produce per-field source badges in the UI.
+   */
+  generationConfigSources?: ContentGeneratorConfigSources;
   cliVersion?: string;
   loadMemoryFromIncludeDirectories?: boolean;
+  importFormat?: 'tree' | 'flat';
+  chatRecording?: boolean;
   // Web search providers
   webSearch?: {
     provider: Array<{
@@ -330,25 +419,52 @@ export interface ConfigParameters {
   chatCompression?: ChatCompressionSettings;
   interactive?: boolean;
   trustedFolder?: boolean;
+  defaultFileEncoding?: FileEncodingType;
   useRipgrep?: boolean;
   useBuiltinRipgrep?: boolean;
   shouldUseNodePtyShell?: boolean;
   skipNextSpeakerCheck?: boolean;
   shellExecutionConfig?: ShellExecutionConfig;
-  extensionManagement?: boolean;
   skipLoopDetection?: boolean;
-  vlmSwitchMode?: string;
   truncateToolOutputThreshold?: number;
   truncateToolOutputLines?: number;
-  enableToolOutputTruncation?: boolean;
   eventEmitter?: EventEmitter;
-  useSmartEdit?: boolean;
   output?: OutputSettings;
   inputFormat?: InputFormat;
   outputFormat?: OutputFormat;
   skipStartupContext?: boolean;
   sdkMode?: boolean;
   sessionSubagents?: SubagentConfig[];
+  channel?: string;
+  /** Model providers configuration grouped by authType */
+  modelProvidersConfig?: ModelProvidersConfig;
+  /** Multi-agent collaboration settings (Arena, Team, Swarm) */
+  agents?: AgentsCollabSettings;
+  /**
+   * Disable all hooks (default: false, hooks enabled).
+   * Migration note: This replaces the deprecated hooksConfig.enabled setting.
+   * Users with old settings.json containing hooksConfig.enabled should migrate
+   * to use disableAllHooks instead (note: inverted logic - enabled:true → disableAllHooks:false).
+   */
+  disableAllHooks?: boolean;
+  /** Hooks configuration from settings */
+  hooks?: Record<string, unknown>;
+  /** Warnings generated during configuration resolution */
+  warnings?: string[];
+  /**
+   * Callback for persisting a permission rule to settings.
+   * Injected by the CLI layer; core uses this to write allow/ask/deny rules
+   * to project or user settings when the user clicks "Always Allow".
+   *
+   * @param scope - 'project' for workspace settings, 'user' for user settings.
+   * @param ruleType - 'allow' | 'ask' | 'deny'.
+   * @param rule - The raw rule string, e.g. "Bash(git *)" or "Edit".
+   */
+  onPersistPermissionRule?: (
+    scope: 'project' | 'user',
+    ruleType: 'allow' | 'ask' | 'deny',
+    rule: string,
+  ) => Promise<void>;
 }
 
 function normalizeConfigOutputFormat(
@@ -384,14 +500,21 @@ export interface ConfigInitializeOptions {
 export class Config {
   private sessionId: string;
   private sessionData?: ResumedSessionData;
+  private debugLogger: DebugLogger;
   private toolRegistry!: ToolRegistry;
   private promptRegistry!: PromptRegistry;
   private subagentManager!: SubagentManager;
+  private extensionManager!: ExtensionManager;
+  private skillManager: SkillManager | null = null;
+  private permissionManager: PermissionManager | null = null;
   private fileSystemService: FileSystemService;
   private contentGeneratorConfig!: ContentGeneratorConfig;
+  private contentGeneratorConfigSources: ContentGeneratorConfigSources = {};
   private contentGenerator!: ContentGenerator;
-  private _generationConfig: Partial<ContentGeneratorConfig>;
   private readonly embeddingModel: string;
+
+  private modelsConfig!: ModelsConfig;
+  private readonly modelProvidersConfig?: ModelProvidersConfig;
   private readonly sandbox: SandboxConfig | undefined;
   private readonly targetDir: string;
   private workspaceContext: WorkspaceContext;
@@ -400,31 +523,40 @@ export class Config {
   private readonly outputFormat: OutputFormat;
   private readonly includePartialMessages: boolean;
   private readonly question: string | undefined;
-  private readonly fullContext: boolean;
+  private readonly systemPrompt: string | undefined;
+  private readonly appendSystemPrompt: string | undefined;
   private readonly coreTools: string[] | undefined;
   private readonly allowedTools: string[] | undefined;
   private readonly excludeTools: string[] | undefined;
+  private readonly permissionsAllow: string[];
+  private readonly permissionsAsk: string[];
+  private readonly permissionsDeny: string[];
   private readonly toolDiscoveryCommand: string | undefined;
   private readonly toolCallCommand: string | undefined;
   private readonly mcpServerCommand: string | undefined;
   private mcpServers: Record<string, MCPServerConfig> | undefined;
+  private readonly lspEnabled: boolean;
+  private lspClient?: LspClient;
+  private readonly allowedMcpServers?: string[];
+  private excludedMcpServers?: string[];
   private sessionSubagents: SubagentConfig[];
   private userMemory: string;
   private sdkMode: boolean;
   private geminiMdFileCount: number;
   private approvalMode: ApprovalMode;
-  private readonly showMemoryUsage: boolean;
+  private prePlanMode?: ApprovalMode;
   private readonly accessibility: AccessibilitySettings;
   private readonly telemetrySettings: TelemetrySettings;
   private readonly gitCoAuthor: GitCoAuthorSettings;
   private readonly usageStatisticsEnabled: boolean;
   private geminiClient!: GeminiClient;
   private baseLlmClient!: BaseLlmClient;
+  private cronScheduler: CronScheduler | null = null;
   private readonly fileFiltering: {
     respectGitIgnore: boolean;
     respectQwenIgnore: boolean;
     enableRecursiveFileSearch: boolean;
-    disableFuzzySearch: boolean;
+    enableFuzzySearch: boolean;
   };
   private fileDiscoveryService: FileDiscoveryService | null = null;
   private gitService: GitService | undefined = undefined;
@@ -434,29 +566,24 @@ export class Config {
   private readonly proxy: string | undefined;
   private readonly cwd: string;
   private readonly bugCommand: BugCommandSettings | undefined;
-  private readonly extensionContextFilePaths: string[];
+  private readonly outputLanguageFilePath?: string;
   private readonly noBrowser: boolean;
   private readonly folderTrustFeature: boolean;
   private readonly folderTrust: boolean;
   private ideMode: boolean;
 
-  private inFallbackMode = false;
   private readonly maxSessionTurns: number;
+  private readonly clearContextOnIdle: ClearContextOnIdleSettings;
   private readonly sessionTokenLimit: number;
   private readonly listExtensions: boolean;
-  private readonly _extensions: GeminiCLIExtension[];
-  private readonly _blockedMcpServers: Array<{
-    name: string;
-    extensionName: string;
-  }>;
-  fallbackModelHandler?: FallbackModelHandler;
-  private quotaErrorOccurred: boolean = false;
-  private readonly summarizeToolOutput:
-    | Record<string, SummarizeToolOutputSettings>
-    | undefined;
+  private readonly overrideExtensions?: string[];
+
   private readonly cliVersion?: string;
   private readonly experimentalZedIntegration: boolean = false;
+  private readonly cronEnabled: boolean = false;
+  private readonly chatRecordingEnabled: boolean;
   private readonly loadMemoryFromIncludeDirectories: boolean = false;
+  private readonly importFormat: 'tree' | 'flat';
   private readonly webSearch?: {
     provider: Array<{
       type: 'tavily' | 'google' | 'dashscope';
@@ -473,22 +600,38 @@ export class Config {
   private readonly shouldUseNodePtyShell: boolean;
   private readonly skipNextSpeakerCheck: boolean;
   private shellExecutionConfig: ShellExecutionConfig;
-  private readonly extensionManagement: boolean = true;
+  private arenaManager: ArenaManager | null = null;
+  private arenaManagerChangeCallback:
+    | ((manager: ArenaManager | null) => void)
+    | null = null;
+  private readonly arenaAgentClient: ArenaAgentClient | null;
+  private readonly agentsSettings: AgentsCollabSettings;
   private readonly skipLoopDetection: boolean;
   private readonly skipStartupContext: boolean;
-  private readonly vlmSwitchMode: string | undefined;
+  private readonly warnings: string[];
+  private readonly onPersistPermissionRuleCallback?: (
+    scope: 'project' | 'user',
+    ruleType: 'allow' | 'ask' | 'deny',
+    rule: string,
+  ) => Promise<void>;
   private initialized: boolean = false;
   readonly storage: Storage;
   private readonly fileExclusions: FileExclusions;
   private readonly truncateToolOutputThreshold: number;
   private readonly truncateToolOutputLines: number;
-  private readonly enableToolOutputTruncation: boolean;
   private readonly eventEmitter?: EventEmitter;
-  private readonly useSmartEdit: boolean;
+  private readonly channel: string | undefined;
+  private readonly defaultFileEncoding: FileEncodingType | undefined;
+  private readonly disableAllHooks: boolean;
+  private readonly hooks?: Record<string, unknown>;
+  private hookSystem?: HookSystem;
+  private messageBus?: MessageBus;
 
   constructor(params: ConfigParameters) {
     this.sessionId = params.sessionId ?? randomUUID();
     this.sessionData = params.sessionData;
+    setDebugLogSession(this);
+    this.debugLogger = createDebugLogger();
     this.embeddingModel = params.embeddingModel ?? DEFAULT_QWEN_EMBEDDING_MODEL;
     this.fileSystemService = new StandardFileSystemService();
     this.sandbox = params.sandbox;
@@ -505,20 +648,27 @@ export class Config {
     this.outputFormat = normalizedOutputFormat ?? OutputFormat.TEXT;
     this.includePartialMessages = params.includePartialMessages ?? false;
     this.question = params.question;
-    this.fullContext = params.fullContext ?? false;
+    this.systemPrompt = params.systemPrompt;
+    this.appendSystemPrompt = params.appendSystemPrompt;
     this.coreTools = params.coreTools;
     this.allowedTools = params.allowedTools;
     this.excludeTools = params.excludeTools;
+    this.permissionsAllow = params.permissions?.allow || [];
+    this.permissionsAsk = params.permissions?.ask || [];
+    this.permissionsDeny = params.permissions?.deny || [];
     this.toolDiscoveryCommand = params.toolDiscoveryCommand;
     this.toolCallCommand = params.toolCallCommand;
     this.mcpServerCommand = params.mcpServerCommand;
     this.mcpServers = params.mcpServers;
+    this.lspEnabled = params.lsp?.enabled ?? false;
+    this.lspClient = params.lspClient;
+    this.allowedMcpServers = params.allowedMcpServers;
+    this.excludedMcpServers = params.excludedMcpServers;
     this.sessionSubagents = params.sessionSubagents ?? [];
     this.sdkMode = params.sdkMode ?? false;
     this.userMemory = params.userMemory ?? '';
     this.geminiMdFileCount = params.geminiMdFileCount ?? 0;
     this.approvalMode = params.approvalMode ?? ApprovalMode.DEFAULT;
-    this.showMemoryUsage = params.showMemoryUsage ?? false;
     this.accessibility = params.accessibility ?? {};
     this.telemetrySettings = {
       enabled: params.telemetry?.enabled ?? false,
@@ -530,59 +680,66 @@ export class Config {
       useCollector: params.telemetry?.useCollector,
     };
     this.gitCoAuthor = {
-      enabled: params.gitCoAuthor?.enabled ?? true,
-      name: params.gitCoAuthor?.name ?? 'Qwen-Coder',
-      email: params.gitCoAuthor?.email ?? 'qwen-coder@alibabacloud.com',
+      enabled: params.gitCoAuthor ?? true,
+      name: 'Qwen-Coder',
+      email: 'qwen-coder@alibabacloud.com',
     };
     this.usageStatisticsEnabled = params.usageStatisticsEnabled ?? true;
+    this.outputLanguageFilePath = params.outputLanguageFilePath;
 
     this.fileFiltering = {
       respectGitIgnore: params.fileFiltering?.respectGitIgnore ?? true,
       respectQwenIgnore: params.fileFiltering?.respectQwenIgnore ?? true,
       enableRecursiveFileSearch:
         params.fileFiltering?.enableRecursiveFileSearch ?? true,
-      disableFuzzySearch: params.fileFiltering?.disableFuzzySearch ?? false,
+      enableFuzzySearch: params.fileFiltering?.enableFuzzySearch ?? true,
     };
     this.checkpointing = params.checkpointing ?? false;
     this.proxy = params.proxy;
     this.cwd = params.cwd ?? process.cwd();
     this.fileDiscoveryService = params.fileDiscoveryService ?? null;
     this.bugCommand = params.bugCommand;
-    this.extensionContextFilePaths = params.extensionContextFilePaths ?? [];
     this.maxSessionTurns = params.maxSessionTurns ?? -1;
+    this.clearContextOnIdle = {
+      thinkingThresholdMinutes:
+        params.clearContextOnIdle?.thinkingThresholdMinutes ?? 5,
+      toolResultsThresholdMinutes:
+        params.clearContextOnIdle?.toolResultsThresholdMinutes ?? 60,
+      toolResultsNumToKeep:
+        params.clearContextOnIdle?.toolResultsNumToKeep ?? 5,
+    };
     this.sessionTokenLimit = params.sessionTokenLimit ?? -1;
     this.experimentalZedIntegration =
       params.experimentalZedIntegration ?? false;
+    this.cronEnabled = params.cronEnabled ?? false;
     this.listExtensions = params.listExtensions ?? false;
-    this._extensions = params.extensions ?? [];
-    this._blockedMcpServers = params.blockedMcpServers ?? [];
+    this.overrideExtensions = params.overrideExtensions;
     this.noBrowser = params.noBrowser ?? false;
-    this.summarizeToolOutput = params.summarizeToolOutput;
     this.folderTrustFeature = params.folderTrustFeature ?? false;
     this.folderTrust = params.folderTrust ?? false;
     this.ideMode = params.ideMode ?? false;
-    this._generationConfig = {
-      model: params.model,
-      ...(params.generationConfig || {}),
-      baseUrl: params.generationConfig?.baseUrl || DEFAULT_DASHSCOPE_BASE_URL,
-    };
-    this.contentGeneratorConfig = this
-      ._generationConfig as ContentGeneratorConfig;
+    this.modelProvidersConfig = params.modelProvidersConfig;
     this.cliVersion = params.cliVersion;
+
+    this.chatRecordingEnabled = params.chatRecording ?? true;
 
     this.loadMemoryFromIncludeDirectories =
       params.loadMemoryFromIncludeDirectories ?? false;
+    this.importFormat = params.importFormat ?? 'tree';
     this.chatCompression = params.chatCompression;
     this.interactive = params.interactive ?? false;
     this.trustedFolder = params.trustedFolder;
     this.skipLoopDetection = params.skipLoopDetection ?? false;
     this.skipStartupContext = params.skipStartupContext ?? false;
+    this.warnings = params.warnings ?? [];
+    this.onPersistPermissionRuleCallback = params.onPersistPermissionRule;
 
     // Web search
     this.webSearch = params.webSearch;
     this.useRipgrep = params.useRipgrep ?? true;
     this.useBuiltinRipgrep = params.useBuiltinRipgrep ?? true;
-    this.shouldUseNodePtyShell = params.shouldUseNodePtyShell ?? false;
+    this.shouldUseNodePtyShell =
+      params.shouldUseNodePtyShell ?? shouldDefaultToNodePty();
     this.skipNextSpeakerCheck = params.skipNextSpeakerCheck ?? true;
     this.shellExecutionConfig = {
       terminalWidth: params.shellExecutionConfig?.terminalWidth ?? 80,
@@ -595,27 +752,53 @@ export class Config {
       DEFAULT_TRUNCATE_TOOL_OUTPUT_THRESHOLD;
     this.truncateToolOutputLines =
       params.truncateToolOutputLines ?? DEFAULT_TRUNCATE_TOOL_OUTPUT_LINES;
-    this.enableToolOutputTruncation = params.enableToolOutputTruncation ?? true;
-    this.useSmartEdit = params.useSmartEdit ?? false;
-    this.extensionManagement = params.extensionManagement ?? true;
+    this.channel = params.channel;
+    this.defaultFileEncoding = params.defaultFileEncoding;
     this.storage = new Storage(this.targetDir);
-    this.vlmSwitchMode = params.vlmSwitchMode;
     this.inputFormat = params.inputFormat ?? InputFormat.TEXT;
     this.fileExclusions = new FileExclusions(this);
     this.eventEmitter = params.eventEmitter;
+    this.arenaAgentClient = ArenaAgentClient.create();
+    this.agentsSettings = params.agents ?? {};
     if (params.contextFileName) {
       setGeminiMdFilename(params.contextFileName);
     }
+
+    // Create ModelsConfig for centralized model management
+    // Prefer params.authType over generationConfig.authType because:
+    // - params.authType preserves undefined (user hasn't selected yet)
+    // - generationConfig.authType may have a default value from resolvers
+    this.modelsConfig = new ModelsConfig({
+      initialAuthType: params.authType ?? params.generationConfig?.authType,
+      modelProvidersConfig: this.modelProvidersConfig,
+      generationConfig: {
+        model: params.model,
+        ...(params.generationConfig || {}),
+        baseUrl: params.generationConfig?.baseUrl,
+      },
+      generationConfigSources: params.generationConfigSources,
+      onModelChange: this.handleModelChange.bind(this),
+    });
 
     if (this.telemetrySettings.enabled) {
       initializeTelemetry(this);
     }
 
-    if (this.getProxy()) {
-      setGlobalDispatcher(new ProxyAgent(this.getProxy() as string));
+    const proxyUrl = this.getProxy();
+    if (proxyUrl) {
+      setGlobalDispatcher(new ProxyAgent(proxyUrl));
     }
     this.geminiClient = new GeminiClient(this);
-    this.chatRecordingService = new ChatRecordingService(this);
+    this.chatRecordingService = this.chatRecordingEnabled
+      ? new ChatRecordingService(this)
+      : undefined;
+    this.extensionManager = new ExtensionManager({
+      workspaceDir: this.targetDir,
+      enabledExtensionOverrides: this.overrideExtensions,
+      isWorkspaceTrusted: this.isTrustedFolder(),
+    });
+    this.disableAllHooks = params.disableAllHooks ?? false;
+    this.hooks = params.hooks;
   }
 
   /**
@@ -627,6 +810,7 @@ export class Config {
       throw Error('Config was already initialized');
     }
     this.initialized = true;
+    this.debugLogger.info('Config initialization started');
 
     // Initialize centralized FileDiscoveryService
     this.getFileService();
@@ -634,20 +818,226 @@ export class Config {
       await this.getGitService();
     }
     this.promptRegistry = new PromptRegistry();
+    this.extensionManager.setConfig(this);
+    await this.extensionManager.refreshCache();
+    this.debugLogger.debug('Extension manager initialized');
+
+    // Initialize hook system if enabled
+    if (!this.disableAllHooks) {
+      this.hookSystem = new HookSystem(this);
+      await this.hookSystem.initialize();
+      this.debugLogger.debug('Hook system initialized');
+
+      // Initialize MessageBus for hook execution
+      this.messageBus = new MessageBus();
+
+      // Subscribe to HOOK_EXECUTION_REQUEST to execute hooks
+      this.messageBus.subscribe<HookExecutionRequest>(
+        MessageBusType.HOOK_EXECUTION_REQUEST,
+        async (request: HookExecutionRequest) => {
+          try {
+            const hookSystem = this.hookSystem;
+            if (!hookSystem) {
+              this.messageBus?.publish({
+                type: MessageBusType.HOOK_EXECUTION_RESPONSE,
+                correlationId: request.correlationId,
+                success: false,
+                error: new Error('Hook system not initialized'),
+              } as HookExecutionResponse);
+              return;
+            }
+
+            // Check if request was aborted
+            if (request.signal?.aborted) {
+              this.messageBus?.publish({
+                type: MessageBusType.HOOK_EXECUTION_RESPONSE,
+                correlationId: request.correlationId,
+                success: false,
+                error: new Error('Hook execution cancelled (aborted)'),
+              } as HookExecutionResponse);
+              return;
+            }
+
+            // Execute the appropriate hook based on eventName
+            let result;
+            let stopHookCount: number | undefined;
+            const input = request.input || {};
+            const signal = request.signal;
+            switch (request.eventName) {
+              case 'UserPromptSubmit':
+                result = await hookSystem.fireUserPromptSubmitEvent(
+                  (input['prompt'] as string) || '',
+                  signal,
+                );
+                break;
+              case 'Stop': {
+                const stopResult = await hookSystem.fireStopEvent(
+                  (input['stop_hook_active'] as boolean) || false,
+                  (input['last_assistant_message'] as string) || '',
+                  signal,
+                );
+                result = stopResult.finalOutput
+                  ? createHookOutput('Stop', stopResult.finalOutput)
+                  : undefined;
+                stopHookCount = stopResult.allOutputs.length;
+                break;
+              }
+              case 'PreToolUse': {
+                result = await hookSystem.firePreToolUseEvent(
+                  (input['tool_name'] as string) || '',
+                  (input['tool_input'] as Record<string, unknown>) || {},
+                  (input['tool_use_id'] as string) || '',
+                  (input['permission_mode'] as PermissionMode | undefined) ??
+                    PermissionMode.Default,
+                  signal,
+                );
+                break;
+              }
+              case 'PostToolUse':
+                result = await hookSystem.firePostToolUseEvent(
+                  (input['tool_name'] as string) || '',
+                  (input['tool_input'] as Record<string, unknown>) || {},
+                  (input['tool_response'] as Record<string, unknown>) || {},
+                  (input['tool_use_id'] as string) || '',
+                  (input['permission_mode'] as PermissionMode) || 'default',
+                  signal,
+                );
+                break;
+              case 'PostToolUseFailure':
+                result = await hookSystem.firePostToolUseFailureEvent(
+                  (input['tool_use_id'] as string) || '',
+                  (input['tool_name'] as string) || '',
+                  (input['tool_input'] as Record<string, unknown>) || {},
+                  (input['error'] as string) || '',
+                  input['is_interrupt'] as boolean | undefined,
+                  (input['permission_mode'] as PermissionMode) || 'default',
+                  signal,
+                );
+                break;
+              case 'Notification':
+                result = await hookSystem.fireNotificationEvent(
+                  (input['message'] as string) || '',
+                  (input['notification_type'] as NotificationType) ||
+                    'permission_prompt',
+                  (input['title'] as string) || undefined,
+                  signal,
+                );
+                break;
+              case 'PermissionRequest':
+                result = await hookSystem.firePermissionRequestEvent(
+                  (input['tool_name'] as string) || '',
+                  (input['tool_input'] as Record<string, unknown>) || {},
+                  (input['permission_mode'] as PermissionMode) ||
+                    PermissionMode.Default,
+                  (input['permission_suggestions'] as
+                    | PermissionSuggestion[]
+                    | undefined) || undefined,
+                  signal,
+                );
+                break;
+              case 'SubagentStart':
+                result = await hookSystem.fireSubagentStartEvent(
+                  (input['agent_id'] as string) || '',
+                  (input['agent_type'] as string) || '',
+                  (input['permission_mode'] as PermissionMode) ||
+                    PermissionMode.Default,
+                  signal,
+                );
+                break;
+              case 'SubagentStop':
+                result = await hookSystem.fireSubagentStopEvent(
+                  (input['agent_id'] as string) || '',
+                  (input['agent_type'] as string) || '',
+                  (input['agent_transcript_path'] as string) || '',
+                  (input['last_assistant_message'] as string) || '',
+                  (input['stop_hook_active'] as boolean) || false,
+                  (input['permission_mode'] as PermissionMode) ||
+                    PermissionMode.Default,
+                  signal,
+                );
+                break;
+              default:
+                this.debugLogger.warn(
+                  `Unknown hook event: ${request.eventName}`,
+                );
+                result = undefined;
+            }
+
+            // Send response
+            this.messageBus?.publish({
+              type: MessageBusType.HOOK_EXECUTION_RESPONSE,
+              correlationId: request.correlationId,
+              success: true,
+              output: result,
+              // Include stop hook count for Stop events
+              stopHookCount,
+            } as HookExecutionResponse);
+          } catch (error) {
+            this.debugLogger.warn(`Hook execution failed: ${error}`);
+            this.messageBus?.publish({
+              type: MessageBusType.HOOK_EXECUTION_RESPONSE,
+              correlationId: request.correlationId,
+              success: false,
+              error: error instanceof Error ? error : new Error(String(error)),
+            } as HookExecutionResponse);
+          }
+        },
+      );
+
+      this.debugLogger.debug('MessageBus initialized with hook subscription');
+    } else {
+      this.debugLogger.debug('Hook system disabled, skipping initialization');
+    }
+
     this.subagentManager = new SubagentManager(this);
+    this.skillManager = new SkillManager(this);
+    await this.skillManager.startWatching();
+    this.debugLogger.debug('Skill manager initialized');
+
+    this.permissionManager = new PermissionManager(this);
+    this.permissionManager.initialize();
+    this.debugLogger.debug('Permission manager initialized');
 
     // Load session subagents if they were provided before initialization
     if (this.sessionSubagents.length > 0) {
       this.subagentManager.loadSessionSubagents(this.sessionSubagents);
     }
 
+    await this.extensionManager.refreshCache();
+
+    await this.refreshHierarchicalMemory();
+    this.debugLogger.debug('Hierarchical memory loaded');
+
     this.toolRegistry = await this.createToolRegistry(
       options?.sendSdkMcpMessage,
     );
+    this.debugLogger.info(
+      `Tool registry initialized with ${this.toolRegistry.getAllToolNames().length} tools`,
+    );
 
     await this.geminiClient.initialize();
+    this.debugLogger.info('Gemini client initialized');
+
+    // Detect and capture runtime model snapshot (from CLI/ENV/credentials)
+    this.modelsConfig.detectAndCaptureRuntimeModel();
 
     logStartSession(this, new StartSessionEvent(this));
+    this.debugLogger.info('Config initialization completed');
+  }
+
+  async refreshHierarchicalMemory(): Promise<void> {
+    const { memoryContent, fileCount } = await loadServerHierarchicalMemory(
+      this.getWorkingDir(),
+      this.shouldLoadMemoryFromIncludeDirectories()
+        ? this.getWorkspaceContext().getDirectories()
+        : [],
+      this.getFileService(),
+      this.getExtensionContextFilePaths(),
+      this.isTrustedFolder(),
+      this.getImportFormat(),
+    );
+    this.setUserMemory(memoryContent);
+    this.setGeminiMdFileCount(fileCount);
   }
 
   getContentGenerator(): ContentGenerator {
@@ -655,54 +1045,90 @@ export class Config {
   }
 
   /**
-   * Updates the credentials in the generation config.
-   * This is needed when credentials are set after Config construction.
+   * Get the ModelsConfig instance for model-related operations.
+   * External code (e.g., CLI) can use this to access model configuration.
    */
-  updateCredentials(credentials: {
-    apiKey?: string;
-    baseUrl?: string;
-    model?: string;
-  }): void {
-    if (credentials.apiKey) {
-      this._generationConfig.apiKey = credentials.apiKey;
-    }
-    if (credentials.baseUrl) {
-      this._generationConfig.baseUrl = credentials.baseUrl;
-    }
-    if (credentials.model) {
-      this._generationConfig.model = credentials.model;
-    }
+  getModelsConfig(): ModelsConfig {
+    return this.modelsConfig;
   }
 
-  async refreshAuth(authMethod: AuthType, isInitialAuth?: boolean) {
-    // Vertex and Genai have incompatible encryption and sending history with
-    // throughtSignature from Genai to Vertex will fail, we need to strip them
-    if (
-      this.contentGeneratorConfig?.authType === AuthType.USE_GEMINI &&
-      authMethod === AuthType.LOGIN_WITH_GOOGLE
-    ) {
-      // Restore the conversation history to the new client
-      this.geminiClient.stripThoughtsFromHistory();
-    }
+  /**
+   * Updates the credentials in the generation config.
+   * Exclusive for `OpenAIKeyPrompt` to update credentials via `/auth`
+   * Delegates to ModelsConfig.
+   */
+  updateCredentials(
+    credentials: {
+      apiKey?: string;
+      baseUrl?: string;
+      model?: string;
+    },
+    settingsGenerationConfig?: Partial<ContentGeneratorConfig>,
+  ): void {
+    this.modelsConfig.updateCredentials(credentials, settingsGenerationConfig);
+  }
 
-    const newContentGeneratorConfig = createContentGeneratorConfig(
+  /**
+   * Reload model providers configuration at runtime.
+   * This enables hot-reloading of modelProviders settings without restarting the CLI.
+   * Should be called before refreshAuth when settings.json has been updated.
+   *
+   * @param modelProvidersConfig - The updated model providers configuration
+   */
+  reloadModelProvidersConfig(
+    modelProvidersConfig?: ModelProvidersConfig,
+  ): void {
+    this.modelsConfig.reloadModelProvidersConfig(modelProvidersConfig);
+  }
+
+  /**
+   * Refresh authentication and rebuild ContentGenerator.
+   */
+  async refreshAuth(authMethod: AuthType, isInitialAuth?: boolean) {
+    // Sync modelsConfig state for this auth refresh
+    const modelId = this.modelsConfig.getModel();
+    this.modelsConfig.syncAfterAuthRefresh(authMethod, modelId);
+
+    // Check and consume cached credentials flag
+    const requireCached =
+      this.modelsConfig.consumeRequireCachedCredentialsFlag();
+
+    const { config, sources } = resolveContentGeneratorConfigWithSources(
       this,
       authMethod,
-      this._generationConfig,
+      this.modelsConfig.getGenerationConfig(),
+      this.modelsConfig.getGenerationConfigSources(),
+      {
+        strictModelProvider: this.modelsConfig.isStrictModelProviderSelection(),
+      },
     );
+    const newContentGeneratorConfig = config;
     this.contentGenerator = await createContentGenerator(
       newContentGeneratorConfig,
       this,
-      isInitialAuth,
+      requireCached ? true : isInitialAuth,
     );
     // Only assign to instance properties after successful initialization
     this.contentGeneratorConfig = newContentGeneratorConfig;
+    this.contentGeneratorConfigSources = sources;
 
     // Initialize BaseLlmClient now that the ContentGenerator is available
     this.baseLlmClient = new BaseLlmClient(this.contentGenerator, this);
 
-    // Reset the session flag since we're explicitly changing auth and using default model
-    this.inFallbackMode = false;
+    // Fire auth_success notification hook (supports both interactive & non-interactive)
+    const messageBus = this.getMessageBus();
+    const hooksEnabled = !this.getDisableAllHooks();
+    if (hooksEnabled && messageBus) {
+      fireNotificationHook(
+        messageBus,
+        `Successfully authenticated with ${authMethod}`,
+        NotificationType.AuthSuccess,
+        'Authentication successful',
+      ).catch(() => {
+        // Silently ignore errors - fireNotificationHook has internal error handling
+        // and notification hooks should not block the auth flow
+      });
+    }
   }
 
   /**
@@ -730,12 +1156,32 @@ export class Config {
   }
 
   /**
+   * Returns warnings generated during configuration resolution.
+   * These warnings are collected from model configuration resolution
+   * and should be displayed to the user during startup.
+   */
+  getWarnings(): string[] {
+    return this.warnings;
+  }
+
+  getDebugLogger(): DebugLogger {
+    return this.debugLogger;
+  }
+
+  /**
    * Starts a new session and resets session-scoped services.
    */
-  startNewSession(sessionId?: string): string {
+  startNewSession(
+    sessionId?: string,
+    sessionData?: ResumedSessionData,
+  ): string {
     this.sessionId = sessionId ?? randomUUID();
-    this.sessionData = undefined;
-    this.chatRecordingService = new ChatRecordingService(this);
+    this.sessionData = sessionData;
+    setDebugLogSession(this);
+    this.debugLogger = createDebugLogger();
+    this.chatRecordingService = this.chatRecordingEnabled
+      ? new ChatRecordingService(this)
+      : undefined;
     if (this.initialized) {
       logStartSession(this, new StartSessionEvent(this));
     }
@@ -753,51 +1199,167 @@ export class Config {
     return this.loadMemoryFromIncludeDirectories;
   }
 
+  getImportFormat(): 'tree' | 'flat' {
+    return this.importFormat;
+  }
+
   getContentGeneratorConfig(): ContentGeneratorConfig {
     return this.contentGeneratorConfig;
   }
 
-  getModel(): string {
-    return this.contentGeneratorConfig?.model || DEFAULT_QWEN_MODEL;
+  getContentGeneratorConfigSources(): ContentGeneratorConfigSources {
+    // If contentGeneratorConfigSources is empty (before initializeAuth),
+    // get sources from ModelsConfig
+    if (
+      Object.keys(this.contentGeneratorConfigSources).length === 0 &&
+      this.modelsConfig
+    ) {
+      return this.modelsConfig.getGenerationConfigSources();
+    }
+    return this.contentGeneratorConfigSources;
   }
 
+  getModel(): string {
+    return this.contentGeneratorConfig?.model || this.modelsConfig.getModel();
+  }
+
+  /**
+   * Set model programmatically (e.g., VLM auto-switch, fallback).
+   * Delegates to ModelsConfig.
+   */
   async setModel(
     newModel: string,
-    _metadata?: { reason?: string; context?: string },
+    metadata?: { reason?: string; context?: string },
   ): Promise<void> {
+    await this.modelsConfig.setModel(newModel, metadata);
+    // Also update contentGeneratorConfig for hot-update compatibility
     if (this.contentGeneratorConfig) {
       this.contentGeneratorConfig.model = newModel;
     }
-    // TODO: Log _metadata for telemetry if needed
-    // This _metadata can be used for tracking model switches (reason, context)
   }
 
-  isInFallbackMode(): boolean {
-    return this.inFallbackMode;
+  /**
+   * Handle model change from ModelsConfig.
+   * This updates the content generator config with the new model settings.
+   */
+  private async handleModelChange(
+    authType: AuthType,
+    requiresRefresh: boolean,
+  ): Promise<void> {
+    if (!this.contentGeneratorConfig) {
+      return;
+    }
+
+    // Hot update path: only supported for qwen-oauth.
+    // For other auth types we always refresh to recreate the ContentGenerator.
+    //
+    // Rationale:
+    // - Non-qwen providers may need to re-validate credentials / baseUrl / envKey.
+    // - ModelsConfig.applyResolvedModelDefaults can clear or change credentials sources.
+    // - Refresh keeps runtime behavior consistent and centralized.
+    if (authType === AuthType.QWEN_OAUTH && !requiresRefresh) {
+      const { config, sources } = resolveContentGeneratorConfigWithSources(
+        this,
+        authType,
+        this.modelsConfig.getGenerationConfig(),
+        this.modelsConfig.getGenerationConfigSources(),
+        {
+          strictModelProvider:
+            this.modelsConfig.isStrictModelProviderSelection(),
+        },
+      );
+
+      // Hot-update fields (qwen-oauth models share the same auth + client).
+      this.contentGeneratorConfig.model = config.model;
+      this.contentGeneratorConfig.samplingParams = config.samplingParams;
+      this.contentGeneratorConfig.contextWindowSize = config.contextWindowSize;
+      this.contentGeneratorConfig.enableCacheControl =
+        config.enableCacheControl;
+
+      if ('model' in sources) {
+        this.contentGeneratorConfigSources['model'] = sources['model'];
+      }
+      if ('samplingParams' in sources) {
+        this.contentGeneratorConfigSources['samplingParams'] =
+          sources['samplingParams'];
+      }
+      if ('enableCacheControl' in sources) {
+        this.contentGeneratorConfigSources['enableCacheControl'] =
+          sources['enableCacheControl'];
+      }
+      if ('contextWindowSize' in sources) {
+        this.contentGeneratorConfigSources['contextWindowSize'] =
+          sources['contextWindowSize'];
+      }
+      return;
+    }
+
+    // Full refresh path
+    await this.refreshAuth(authType);
   }
 
-  setFallbackMode(active: boolean): void {
-    this.inFallbackMode = active;
+  /**
+   * Get available models for the current authType.
+   * Delegates to ModelsConfig.
+   */
+  getAvailableModels(): AvailableModel[] {
+    return this.modelsConfig.getAvailableModels();
   }
 
-  setFallbackModelHandler(handler: FallbackModelHandler): void {
-    this.fallbackModelHandler = handler;
+  /**
+   * Get available models for a specific authType.
+   * Delegates to ModelsConfig.
+   */
+  getAvailableModelsForAuthType(authType: AuthType): AvailableModel[] {
+    return this.modelsConfig.getAvailableModelsForAuthType(authType);
+  }
+
+  /**
+   * Get all configured models across authTypes.
+   * Delegates to ModelsConfig.
+   */
+  getAllConfiguredModels(authTypes?: AuthType[]): AvailableModel[] {
+    return this.modelsConfig.getAllConfiguredModels(authTypes);
+  }
+
+  /**
+   * Get the currently active runtime model snapshot.
+   * Delegates to ModelsConfig.
+   */
+  getActiveRuntimeModelSnapshot(): RuntimeModelSnapshot | undefined {
+    return this.modelsConfig.getActiveRuntimeModelSnapshot();
+  }
+
+  /**
+   * Switch authType+model.
+   * Supports both registry-backed models and runtime model snapshots.
+   *
+   * For runtime models, the modelId should be in format `$runtime|${authType}|${modelId}`.
+   * This triggers a refresh of the ContentGenerator when required (always on authType changes).
+   * For qwen-oauth model switches that are hot-update safe, this may update in place.
+   *
+   * @param authType - Target authentication type
+   * @param modelId - Target model ID (or `$runtime|${authType}|${modelId}` for runtime models)
+   * @param options - Additional options like requireCachedCredentials
+   */
+  async switchModel(
+    authType: AuthType,
+    modelId: string,
+    options?: { requireCachedCredentials?: boolean },
+  ): Promise<void> {
+    await this.modelsConfig.switchModel(authType, modelId, options);
   }
 
   getMaxSessionTurns(): number {
     return this.maxSessionTurns;
   }
 
+  getClearContextOnIdle(): ClearContextOnIdleSettings {
+    return this.clearContextOnIdle;
+  }
+
   getSessionTokenLimit(): number {
     return this.sessionTokenLimit;
-  }
-
-  setQuotaErrorOccurred(value: boolean): void {
-    this.quotaErrorOccurred = value;
-  }
-
-  getQuotaErrorOccurred(): boolean {
-    return this.quotaErrorOccurred;
   }
 
   getEmbeddingModel(): string {
@@ -827,12 +1389,40 @@ export class Config {
     return this.targetDir;
   }
 
+  getCwd(): string {
+    return this.targetDir;
+  }
+
   getWorkspaceContext(): WorkspaceContext {
     return this.workspaceContext;
   }
 
   getToolRegistry(): ToolRegistry {
     return this.toolRegistry;
+  }
+
+  /**
+   * Shuts down the Config and releases all resources.
+   * This method is idempotent and safe to call multiple times.
+   * It handles the case where initialization was not completed.
+   */
+  async shutdown(): Promise<void> {
+    if (!this.initialized) {
+      // Nothing to clean up if not initialized
+      return;
+    }
+    try {
+      this.skillManager?.stopWatching();
+
+      if (this.toolRegistry) {
+        await this.toolRegistry.stop();
+      }
+
+      await this.cleanupArenaRuntime();
+    } catch (error) {
+      // Log but don't throw - cleanup should be best-effort
+      this.debugLogger.error('Error during Config shutdown:', error);
+    }
   }
 
   getPromptRegistry(): PromptRegistry {
@@ -847,20 +1437,68 @@ export class Config {
     return this.question;
   }
 
-  getFullContext(): boolean {
-    return this.fullContext;
+  getSystemPrompt(): string | undefined {
+    return this.systemPrompt;
   }
 
+  getAppendSystemPrompt(): string | undefined {
+    return this.appendSystemPrompt;
+  }
+
+  /** @deprecated Use getPermissionsAllow() instead. */
   getCoreTools(): string[] | undefined {
     return this.coreTools;
   }
 
-  getAllowedTools(): string[] | undefined {
-    return this.allowedTools;
+  /**
+   * Returns the merged allow-rules for PermissionManager.
+   *
+   * This merges all sources so that PermissionManager receives a single,
+   * authoritative list:
+   *   - settings.permissions.allow  (persistent rules from all scopes)
+   *   - allowedTools param  (SDK / argv auto-approve list)
+   *
+   * Note: coreTools is intentionally excluded here — it has whitelist semantics
+   * (only listed tools are registered), not auto-approve semantics. It is
+   * handled separately via PermissionManager.coreToolsAllowList.
+   *
+   * CLI callers (loadCliConfig) already pre-merge argv into permissionsAllow
+   * before constructing Config, so those fields will be empty for CLI usage.
+   * SDK callers construct Config directly and rely on allowedTools.
+   */
+  getPermissionsAllow(): string[] {
+    const base = this.permissionsAllow ?? [];
+    const sdkAllow = [...(this.allowedTools ?? [])];
+    if (sdkAllow.length === 0) return base.length > 0 ? base : [];
+    const merged = [...base];
+    for (const t of sdkAllow) {
+      if (t && !merged.includes(t)) merged.push(t);
+    }
+    return merged;
   }
 
-  getExcludeTools(): string[] | undefined {
-    return this.excludeTools;
+  getPermissionsAsk(): string[] {
+    return this.permissionsAsk;
+  }
+
+  /**
+   * Returns the merged deny-rules for PermissionManager.
+   *
+   * Merges:
+   *   - settings.permissions.deny  (persistent rules from all scopes)
+   *   - excludeTools param  (SDK / argv blocklist)
+   *
+   * CLI callers pre-merge argv.excludeTools into permissionsDeny.
+   */
+  getPermissionsDeny(): string[] {
+    const base = this.permissionsDeny ?? [];
+    const sdkDeny = this.excludeTools ?? [];
+    if (sdkDeny.length === 0) return base.length > 0 ? base : [];
+    const merged = [...base];
+    for (const t of sdkDeny) {
+      if (t && !merged.includes(t)) merged.push(t);
+    }
+    return merged;
   }
 
   getToolDiscoveryCommand(): string | undefined {
@@ -876,7 +1514,45 @@ export class Config {
   }
 
   getMcpServers(): Record<string, MCPServerConfig> | undefined {
-    return this.mcpServers;
+    let mcpServers = { ...(this.mcpServers || {}) };
+    const extensions = this.getActiveExtensions();
+    for (const extension of extensions) {
+      Object.entries(extension.config.mcpServers || {}).forEach(
+        ([key, server]) => {
+          if (mcpServers[key]) return;
+          mcpServers[key] = {
+            ...server,
+            extensionName: extension.config.name,
+          };
+        },
+      );
+    }
+
+    if (this.allowedMcpServers) {
+      mcpServers = Object.fromEntries(
+        Object.entries(mcpServers).filter(([key]) =>
+          this.allowedMcpServers?.includes(key),
+        ),
+      );
+    }
+
+    // Note: We no longer filter out excluded servers here.
+    // The UI layer should check isMcpServerDisabled() to determine
+    // whether to show a server as disabled.
+
+    return mcpServers;
+  }
+
+  getExcludedMcpServers(): string[] | undefined {
+    return this.excludedMcpServers;
+  }
+
+  setExcludedMcpServers(excluded: string[]): void {
+    this.excludedMcpServers = excluded;
+  }
+
+  isMcpServerDisabled(serverName: string): boolean {
+    return this.excludedMcpServers?.includes(serverName) ?? false;
   }
 
   addMcpServers(servers: Record<string, MCPServerConfig>): void {
@@ -884,6 +1560,24 @@ export class Config {
       throw new Error('Cannot modify mcpServers after initialization');
     }
     this.mcpServers = { ...this.mcpServers, ...servers };
+  }
+
+  isLspEnabled(): boolean {
+    return this.lspEnabled;
+  }
+
+  getLspClient(): LspClient | undefined {
+    return this.lspClient;
+  }
+
+  /**
+   * Allows wiring an LSP client after Config construction but before initialize().
+   */
+  setLspClient(client: LspClient | undefined): void {
+    if (this.initialized) {
+      throw new Error('Cannot set LSP client after initialization');
+    }
+    this.lspClient = client;
   }
 
   getSessionSubagents(): SubagentConfig[] {
@@ -921,8 +1615,60 @@ export class Config {
     this.geminiMdFileCount = count;
   }
 
+  getArenaManager(): ArenaManager | null {
+    return this.arenaManager;
+  }
+
+  setArenaManager(manager: ArenaManager | null): void {
+    this.arenaManager = manager;
+    this.arenaManagerChangeCallback?.(manager);
+  }
+
+  /**
+   * Register a callback invoked whenever the arena manager changes.
+   * Pass `null` to unsubscribe. Only one subscriber is supported.
+   */
+  onArenaManagerChange(
+    cb: ((manager: ArenaManager | null) => void) | null,
+  ): void {
+    this.arenaManagerChangeCallback = cb;
+  }
+
+  getArenaAgentClient(): ArenaAgentClient | null {
+    return this.arenaAgentClient;
+  }
+
+  getAgentsSettings(): AgentsCollabSettings {
+    return this.agentsSettings;
+  }
+
+  /**
+   * Clean up Arena runtime. When `force` is true (e.g., /arena select --discard),
+   * always removes worktrees regardless of preserveArtifacts.
+   */
+  async cleanupArenaRuntime(force?: boolean): Promise<void> {
+    const manager = this.arenaManager;
+    if (!manager) {
+      return;
+    }
+    if (!force && this.agentsSettings.arena?.preserveArtifacts) {
+      await manager.cleanupRuntime();
+    } else {
+      await manager.cleanup();
+    }
+    this.setArenaManager(null);
+  }
+
   getApprovalMode(): ApprovalMode {
     return this.approvalMode;
+  }
+
+  /**
+   * Returns the approval mode that was active before entering plan mode.
+   * Falls back to DEFAULT if no pre-plan mode was recorded.
+   */
+  getPrePlanMode(): ApprovalMode {
+    return this.prePlanMode ?? ApprovalMode.DEFAULT;
   }
 
   setApprovalMode(mode: ApprovalMode): void {
@@ -935,11 +1681,53 @@ export class Config {
         'Cannot enable privileged approval modes in an untrusted folder.',
       );
     }
+    // Track the mode before entering plan mode so it can be restored later
+    if (mode === ApprovalMode.PLAN && this.approvalMode !== ApprovalMode.PLAN) {
+      this.prePlanMode = this.approvalMode;
+    } else if (
+      mode !== ApprovalMode.PLAN &&
+      this.approvalMode === ApprovalMode.PLAN
+    ) {
+      this.prePlanMode = undefined;
+    }
     this.approvalMode = mode;
   }
 
-  getShowMemoryUsage(): boolean {
-    return this.showMemoryUsage;
+  /**
+   * Returns the file path for this session's plan file.
+   */
+  getPlanFilePath(): string {
+    return Storage.getPlanFilePath(this.sessionId);
+  }
+
+  /**
+   * Saves a plan to disk for the current session.
+   */
+  savePlan(plan: string): void {
+    const filePath = this.getPlanFilePath();
+    const dir = path.dirname(filePath);
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(filePath, plan, 'utf-8');
+  }
+
+  /**
+   * Loads the plan for the current session, or returns undefined if none exists.
+   */
+  loadPlan(): string | undefined {
+    const filePath = this.getPlanFilePath();
+    try {
+      return fs.readFileSync(filePath, 'utf-8');
+    } catch (error: unknown) {
+      if (
+        typeof error === 'object' &&
+        error !== null &&
+        'code' in error &&
+        (error as NodeJS.ErrnoException).code === 'ENOENT'
+      ) {
+        return undefined;
+      }
+      throw error;
+    }
   }
 
   getInputFormat(): 'text' | 'stream-json' {
@@ -990,12 +1778,25 @@ export class Config {
     return this.geminiClient;
   }
 
+  getCronScheduler(): CronScheduler {
+    if (!this.cronScheduler) {
+      this.cronScheduler = new CronScheduler();
+    }
+    return this.cronScheduler;
+  }
+
+  isCronEnabled(): boolean {
+    // Cron is experimental and opt-in: enabled via settings or env var
+    if (process.env['QWEN_CODE_ENABLE_CRON'] === '1') return true;
+    return this.cronEnabled;
+  }
+
   getEnableRecursiveFileSearch(): boolean {
     return this.fileFiltering.enableRecursiveFileSearch;
   }
 
-  getFileFilteringDisableFuzzySearch(): boolean {
-    return this.fileFiltering.disableFuzzySearch;
+  getFileFilteringEnableFuzzySearch(): boolean {
+    return this.fileFiltering.enableFuzzySearch;
   }
 
   getFileFilteringRespectGitIgnore(): boolean {
@@ -1032,7 +1833,7 @@ export class Config {
   }
 
   getProxy(): string | undefined {
-    return this.proxy;
+    return normalizeProxyUrl(this.proxy);
   }
 
   getWorkingDir(): string {
@@ -1055,7 +1856,13 @@ export class Config {
   }
 
   getExtensionContextFilePaths(): string[] {
-    return this.extensionContextFilePaths;
+    const extensionContextFilePaths = this.getActiveExtensions().flatMap(
+      (e) => e.contextFiles,
+    );
+    return [
+      ...extensionContextFilePaths,
+      ...(this.outputLanguageFilePath ? [this.outputLanguageFilePath] : []),
+    ];
   }
 
   getExperimentalZedIntegration(): boolean {
@@ -1066,16 +1873,112 @@ export class Config {
     return this.listExtensions;
   }
 
-  getExtensionManagement(): boolean {
-    return this.extensionManagement;
+  getExtensionManager(): ExtensionManager {
+    return this.extensionManager;
   }
 
-  getExtensions(): GeminiCLIExtension[] {
-    return this._extensions;
+  /**
+   * Get the hook system instance if hooks are enabled.
+   * Returns undefined if hooks are not enabled.
+   */
+  getHookSystem(): HookSystem | undefined {
+    return this.hookSystem;
+  }
+
+  /**
+   * Fast-path check: returns true only when hooks are enabled AND there are
+   * registered hooks for the given event name.  Callers can use this to skip
+   * expensive MessageBus round-trips when no hooks are configured.
+   */
+  hasHooksForEvent(eventName: string): boolean {
+    return this.hookSystem?.hasHooksForEvent(eventName) ?? false;
+  }
+
+  /**
+   * Check if all hooks are disabled.
+   */
+  getDisableAllHooks(): boolean {
+    return this.disableAllHooks;
+  }
+
+  /**
+   * Get the message bus instance.
+   * Returns undefined if not set.
+   */
+  getMessageBus(): MessageBus | undefined {
+    return this.messageBus;
+  }
+
+  /**
+   * Set the message bus instance.
+   * This is called by the CLI layer to inject the MessageBus.
+   */
+  setMessageBus(messageBus: MessageBus): void {
+    this.messageBus = messageBus;
+  }
+
+  /**
+   * Get project-level hooks configuration.
+   * This is used by the HookRegistry to load project-specific hooks.
+   */
+  getProjectHooks(): Record<string, unknown> | undefined {
+    // This will be populated from settings by the CLI layer
+    // The core Config doesn't have direct access to settings
+    return undefined;
+  }
+
+  /**
+   * Get all hooks configuration (merged from all sources).
+   * This is used by the HookRegistry to load hooks.
+   */
+  getHooks(): Record<string, unknown> | undefined {
+    return this.hooks;
+  }
+
+  getExtensions(): Extension[] {
+    const extensions = this.extensionManager.getLoadedExtensions();
+    if (this.overrideExtensions) {
+      return extensions.filter((e) =>
+        this.overrideExtensions?.includes(e.name),
+      );
+    } else {
+      return extensions;
+    }
+  }
+
+  getActiveExtensions(): Extension[] {
+    return this.getExtensions().filter((e) => e.isActive);
   }
 
   getBlockedMcpServers(): Array<{ name: string; extensionName: string }> {
-    return this._blockedMcpServers;
+    const mcpServers = { ...(this.mcpServers || {}) };
+    const extensions = this.getActiveExtensions();
+    for (const extension of extensions) {
+      Object.entries(extension.config.mcpServers || {}).forEach(
+        ([key, server]) => {
+          if (mcpServers[key]) return;
+          mcpServers[key] = {
+            ...server,
+            extensionName: extension.config.name,
+          };
+        },
+      );
+    }
+    const blockedMcpServers: Array<{ name: string; extensionName: string }> =
+      [];
+
+    if (this.allowedMcpServers) {
+      Object.entries(mcpServers).forEach(([key, server]) => {
+        const isAllowed = this.allowedMcpServers?.includes(key);
+        if (!isAllowed) {
+          blockedMcpServers.push({
+            name: key,
+            extensionName: server.extensionName || '',
+          });
+        }
+      });
+    }
+    return blockedMcpServers;
   }
 
   getNoBrowser(): boolean {
@@ -1084,12 +1987,6 @@ export class Config {
 
   isBrowserLaunchSuppressed(): boolean {
     return this.getNoBrowser() || !shouldAttemptBrowserLaunch();
-  }
-
-  getSummarizeToolOutputConfig():
-    | Record<string, SummarizeToolOutputSettings>
-    | undefined {
-    return this.summarizeToolOutput;
   }
 
   // Web search provider configuration
@@ -1137,11 +2034,23 @@ export class Config {
   }
 
   getAuthType(): AuthType | undefined {
-    return this.contentGeneratorConfig.authType;
+    return this.contentGeneratorConfig?.authType;
   }
 
   getCliVersion(): string | undefined {
     return this.cliVersion;
+  }
+
+  getChannel(): string | undefined {
+    return this.channel;
+  }
+
+  /**
+   * Get the default file encoding for new files.
+   * @returns FileEncodingType
+   */
+  getDefaultFileEncoding(): FileEncodingType | undefined {
+    return this.defaultFileEncoding;
   }
 
   /**
@@ -1208,41 +2117,20 @@ export class Config {
     return this.skipStartupContext;
   }
 
-  getVlmSwitchMode(): string | undefined {
-    return this.vlmSwitchMode;
-  }
-
-  getEnableToolOutputTruncation(): boolean {
-    return this.enableToolOutputTruncation;
-  }
-
   getTruncateToolOutputThreshold(): number {
-    if (
-      !this.enableToolOutputTruncation ||
-      this.truncateToolOutputThreshold <= 0
-    ) {
+    if (this.truncateToolOutputThreshold <= 0) {
       return Number.POSITIVE_INFINITY;
     }
 
-    return Math.min(
-      // Estimate remaining context window in characters (1 token ~= 4 chars).
-      4 *
-        (tokenLimit(this.getModel()) -
-          uiTelemetryService.getLastPromptTokenCount()),
-      this.truncateToolOutputThreshold,
-    );
+    return this.truncateToolOutputThreshold;
   }
 
   getTruncateToolOutputLines(): number {
-    if (!this.enableToolOutputTruncation || this.truncateToolOutputLines <= 0) {
+    if (this.truncateToolOutputLines <= 0) {
       return Number.POSITIVE_INFINITY;
     }
 
     return this.truncateToolOutputLines;
-  }
-
-  getUseSmartEdit(): boolean {
-    return this.useSmartEdit;
   }
 
   getOutputFormat(): OutputFormat {
@@ -1260,11 +2148,29 @@ export class Config {
   /**
    * Returns the chat recording service.
    */
-  getChatRecordingService(): ChatRecordingService {
+  getChatRecordingService(): ChatRecordingService | undefined {
+    if (!this.chatRecordingEnabled) {
+      return undefined;
+    }
     if (!this.chatRecordingService) {
       this.chatRecordingService = new ChatRecordingService(this);
     }
     return this.chatRecordingService;
+  }
+
+  /**
+   * Returns the transcript file path for the current session.
+   * This is the path to the JSONL file where the conversation is recorded.
+   * Returns empty string if chat recording is disabled.
+   */
+  getTranscriptPath(): string {
+    if (!this.chatRecordingEnabled) {
+      return '';
+    }
+    const projectDir = this.storage.getProjectDir();
+    const sessionId = this.getSessionId();
+    const safeFilename = `${sessionId}.jsonl`;
+    return path.join(projectDir, 'chats', safeFilename);
   }
 
   /**
@@ -1285,8 +2191,31 @@ export class Config {
     return this.subagentManager;
   }
 
+  getSkillManager(): SkillManager | null {
+    return this.skillManager;
+  }
+
+  getPermissionManager(): PermissionManager | null {
+    return this.permissionManager;
+  }
+
+  /**
+   * Returns the callback for persisting permission rules to settings files.
+   * Returns undefined if no callback was provided (e.g. SDK mode).
+   */
+  getOnPersistPermissionRule():
+    | ((
+        scope: 'project' | 'user',
+        ruleType: 'allow' | 'ask' | 'deny',
+        rule: string,
+      ) => Promise<void>)
+    | undefined {
+    return this.onPersistPermissionRuleCallback;
+  }
+
   async createToolRegistry(
     sendSdkMcpMessage?: SendSdkMcpMessage,
+    options?: { skipDiscovery?: boolean },
   ): Promise<ToolRegistry> {
     const registry = new ToolRegistry(
       this,
@@ -1294,31 +2223,33 @@ export class Config {
       sendSdkMcpMessage,
     );
 
-    const coreToolsConfig = this.getCoreTools();
-    const excludeToolsConfig = this.getExcludeTools();
-
     // Helper to create & register core tools that are enabled
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const registerCoreTool = (ToolClass: any, ...args: unknown[]) => {
+    const registerCoreTool = async (ToolClass: any, ...args: unknown[]) => {
       const toolName = ToolClass?.Name as ToolName | undefined;
       const className = ToolClass?.name ?? 'UnknownTool';
 
       if (!toolName) {
         // Log warning and skip this tool instead of crashing
-        console.warn(
-          `[Config] Skipping tool registration: ${className} is missing static Name property. ` +
-            `Tools must define a static Name property to be registered. ` +
-            `Location: config.ts:registerCoreTool`,
+        this.debugLogger.warn(
+          `Skipping tool registration: ${className} is missing static Name property. ` +
+            `Tools must define a static Name property to be registered.`,
         );
         return;
       }
 
-      if (isToolEnabled(toolName, coreToolsConfig, excludeToolsConfig)) {
+      // PermissionManager handles both the coreTools allowlist (registry-level)
+      // and deny rules (runtime-level) in a single check.
+      const pmEnabled = this.permissionManager
+        ? await this.permissionManager.isToolEnabled(toolName)
+        : true; // Should never reach here after initialize(), but safe default.
+
+      if (pmEnabled) {
         try {
           registry.registerTool(new ToolClass(...args));
         } catch (error) {
-          console.error(
-            `[Config] Failed to register tool ${className} (${toolName}):`,
+          this.debugLogger.error(
+            `Failed to register tool ${className} (${toolName}):`,
             error,
           );
           throw error; // Re-throw after logging context
@@ -1326,9 +2257,10 @@ export class Config {
       }
     };
 
-    registerCoreTool(TaskTool, this);
-    registerCoreTool(LSTool, this);
-    registerCoreTool(ReadFileTool, this);
+    await registerCoreTool(AgentTool, this);
+    await registerCoreTool(SkillTool, this);
+    await registerCoreTool(LSTool, this);
+    await registerCoreTool(ReadFileTool, this);
 
     if (this.getUseRipgrep()) {
       let useRipgrep = false;
@@ -1339,7 +2271,7 @@ export class Config {
         errorString = getErrorMessage(error);
       }
       if (useRipgrep) {
-        registerCoreTool(RipGrepTool, this);
+        await registerCoreTool(RipGrepTool, this);
       } else {
         // Log for telemetry
         logRipgrepFallback(
@@ -1350,34 +2282,45 @@ export class Config {
             errorString || 'ripgrep is not available',
           ),
         );
-        registerCoreTool(GrepTool, this);
+        await registerCoreTool(GrepTool, this);
       }
     } else {
-      registerCoreTool(GrepTool, this);
+      await registerCoreTool(GrepTool, this);
     }
 
-    registerCoreTool(GlobTool, this);
-    if (this.getUseSmartEdit()) {
-      registerCoreTool(SmartEditTool, this);
-    } else {
-      registerCoreTool(EditTool, this);
-    }
-    registerCoreTool(WriteFileTool, this);
-    registerCoreTool(ReadManyFilesTool, this);
-    registerCoreTool(ShellTool, this);
-    registerCoreTool(MemoryTool);
-    registerCoreTool(TodoWriteTool, this);
-    !this.sdkMode && registerCoreTool(ExitPlanModeTool, this);
-    registerCoreTool(WebFetchTool, this);
+    await registerCoreTool(GlobTool, this);
+    await registerCoreTool(EditTool, this);
+    await registerCoreTool(WriteFileTool, this);
+    await registerCoreTool(ShellTool, this);
+    await registerCoreTool(MemoryTool);
+    await registerCoreTool(TodoWriteTool, this);
+    await registerCoreTool(AskUserQuestionTool, this);
+    !this.sdkMode && (await registerCoreTool(ExitPlanModeTool, this));
+    await registerCoreTool(WebFetchTool, this);
     // Conditionally register web search tool if web search provider is configured
     // buildWebSearchConfig ensures qwen-oauth users get dashscope provider, so
     // if tool is registered, config must exist
     if (this.getWebSearchConfig()) {
-      registerCoreTool(WebSearchTool, this);
+      await registerCoreTool(WebSearchTool, this);
+    }
+    if (this.isLspEnabled() && this.getLspClient()) {
+      // Register the unified LSP tool
+      await registerCoreTool(LspTool, this);
     }
 
-    await registry.discoverAllTools();
-    console.debug('ToolRegistry created', registry.getAllToolNames());
+    // Register cron tools unless disabled
+    if (this.isCronEnabled()) {
+      await registerCoreTool(CronCreateTool, this);
+      await registerCoreTool(CronListTool, this);
+      await registerCoreTool(CronDeleteTool, this);
+    }
+
+    if (!options?.skipDiscovery) {
+      await registry.discoverAllTools();
+    }
+    this.debugLogger.debug(
+      `ToolRegistry created: ${JSON.stringify(registry.getAllToolNames())} (${registry.getAllToolNames().length} tools)`,
+    );
     return registry;
   }
 }

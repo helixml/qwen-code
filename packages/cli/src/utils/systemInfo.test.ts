@@ -57,6 +57,8 @@ describe('systemInfo', () => {
           getModel: vi.fn().mockReturnValue('test-model'),
           getIdeMode: vi.fn().mockReturnValue(true),
           getSessionId: vi.fn().mockReturnValue('test-session-id'),
+          getAuthType: vi.fn().mockReturnValue('test-auth'),
+          getProxy: vi.fn().mockReturnValue(undefined),
           getContentGeneratorConfig: vi.fn().mockReturnValue({
             baseUrl: 'https://api.openai.com',
           }),
@@ -234,6 +236,7 @@ describe('systemInfo', () => {
         selectedAuthType: 'test-auth',
         ideClient: 'test-ide',
         sessionId: 'test-session-id',
+        proxy: undefined,
       });
     });
 
@@ -273,6 +276,9 @@ describe('systemInfo', () => {
       // Update the mock context to use OpenAI auth
       mockContext.services.settings.merged.security!.auth!.selectedType =
         AuthType.USE_OPENAI;
+      vi.mocked(mockContext.services.config!.getAuthType).mockReturnValue(
+        AuthType.USE_OPENAI,
+      );
 
       const extendedInfo = await getExtendedSystemInfo(mockContext);
 

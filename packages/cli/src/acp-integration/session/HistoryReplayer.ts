@@ -4,8 +4,11 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import type { ChatRecord } from '@qwen-code/qwen-code-core';
-import type { Content } from '@google/genai';
+import type { ChatRecord, AgentResultDisplay } from '@qwen-code/qwen-code-core';
+import type {
+  Content,
+  GenerateContentResponseUsageMetadata,
+} from '@google/genai';
 import type { SessionContext } from './types.js';
 import { MessageEmitter } from './emitters/MessageEmitter.js';
 import { ToolCallEmitter } from './emitters/ToolCallEmitter.js';
@@ -18,6 +21,7 @@ import { ToolCallEmitter } from './emitters/ToolCallEmitter.js';
  * have appeared during the original session.
  */
 export class HistoryReplayer {
+  private readonly ctx: SessionContext;
   private readonly messageEmitter: MessageEmitter;
   private readonly toolCallEmitter: ToolCallEmitter;
 
@@ -26,6 +30,7 @@ export class HistoryReplayer {
   private toolCallIdQueue: string[] = [];
 
   constructor(ctx: SessionContext) {
+    this.ctx = ctx;
     this.messageEmitter = new MessageEmitter(ctx);
     this.toolCallEmitter = new ToolCallEmitter(ctx);
   }
@@ -36,27 +41,14 @@ export class HistoryReplayer {
    * @param records - Array of chat records to replay
    */
   async replay(records: ChatRecord[]): Promise<void> {
-    console.error(`🎬 [HISTORY REPLAYER] Replaying ${records.length} records`);
-
     // Pre-scan: Extract callIds from tool_result records in order
     // This ensures function calls use the SAME IDs as their results
     // (fixes "Tool call not found" error on resume)
     this.toolCallIdQueue = this.extractToolCallIds(records);
-    console.error(
-      `🎬 [HISTORY REPLAYER] Pre-scanned ${this.toolCallIdQueue.length} tool call IDs`,
-    );
 
-    let replayedCount = 0;
     for (const record of records) {
-      console.error(
-        `🎬 [HISTORY REPLAYER] Replaying record ${replayedCount + 1}/${records.length}: type=${record.type}`,
-      );
       await this.replayRecord(record);
-      replayedCount++;
     }
-    console.error(
-      `✅ [HISTORY REPLAYER] Finished replaying ${replayedCount} records`,
-    );
   }
 
   /**
@@ -78,16 +70,24 @@ export class HistoryReplayer {
    * Replays a single chat record.
    */
   private async replayRecord(record: ChatRecord): Promise<void> {
+    this.setActiveRecordId(record.uuid, record.timestamp);
     switch (record.type) {
       case 'user':
         if (record.message) {
-          await this.replayContent(record.message, 'user');
+          await this.replayContent(record.message, 'user', record.timestamp);
         }
         break;
 
       case 'assistant':
         if (record.message) {
-          await this.replayContent(record.message, 'assistant');
+          await this.replayContent(
+            record.message,
+            'assistant',
+            record.timestamp,
+          );
+        }
+        if (record.usageMetadata) {
+          await this.replayUsageMetadata(record.usageMetadata);
         }
         break;
 
@@ -99,21 +99,32 @@ export class HistoryReplayer {
         // Skip system records (compression, telemetry, slash commands)
         break;
     }
+    this.setActiveRecordId(null);
   }
 
   /**
    * Replays content from a message (user or assistant).
    * Handles text parts, thought parts, and function calls.
+   *
+   * @param content - The content to replay
+   * @param role - The role (user or assistant)
+   * @param timestamp - Optional server-side timestamp from the JSONL record
    */
   private async replayContent(
     content: Content,
     role: 'user' | 'assistant',
+    timestamp?: string,
   ): Promise<void> {
     for (const part of content.parts ?? []) {
       // Text content
       if ('text' in part && part.text) {
         const isThought = (part as { thought?: boolean }).thought ?? false;
-        await this.messageEmitter.emitMessage(part.text, role, isThought);
+        await this.messageEmitter.emitMessage(
+          part.text,
+          role,
+          isThought,
+          timestamp,
+        );
       }
 
       // Function call (tool start)
@@ -136,33 +147,37 @@ export class HistoryReplayer {
           // Pop the next ID from the queue (they're in order)
           callId = this.toolCallIdQueue.shift();
 
-          // Log if there's a mismatch (for debugging, but we always use queue ID)
-          if (part.functionCall.id && part.functionCall.id !== callId) {
-            console.error(
-              `🔧 [HISTORY REPLAYER] callId mismatch for ${functionName}: ` +
-                `message has ${part.functionCall.id}, using queue ID ${callId}`,
-            );
-          }
+          // Use queue ID even if there's a mismatch with the message ID
         } else if (part.functionCall.id) {
           // Fallback: use the ID from the functionCall if queue is empty
           callId = part.functionCall.id;
         }
 
         // Last resort: generate an ID (shouldn't happen in well-formed history)
+        // Last resort: generate an ID (shouldn't happen in well-formed history)
         if (!callId) {
           callId = `${functionName}-${Date.now()}`;
-          console.error(
-            `⚠️ [HISTORY REPLAYER] No callId available for ${functionName}, generated: ${callId}`,
-          );
         }
 
         await this.toolCallEmitter.emitStart({
           toolName: functionName,
           callId,
           args: part.functionCall.args as Record<string, unknown>,
+          status: 'in_progress',
+          timestamp,
         });
       }
     }
+  }
+
+  /**
+   * Replays usage metadata.
+   * @param usageMetadata - The usage metadata to replay
+   */
+  private async replayUsageMetadata(
+    usageMetadata: GenerateContentResponseUsageMetadata,
+  ): Promise<void> {
+    await this.messageEmitter.emitUsageMetadata(usageMetadata);
   }
 
   /**
@@ -189,7 +204,56 @@ export class HistoryReplayer {
       // For TodoWriteTool fallback, try to extract args from the record
       // Note: args aren't stored in tool_result records by default
       args: undefined,
+      timestamp: record.timestamp,
     });
+
+    // Special handling: Task tool execution summary contains token usage
+    const { resultDisplay } = result ?? {};
+    if (
+      !!resultDisplay &&
+      typeof resultDisplay === 'object' &&
+      'type' in resultDisplay &&
+      (resultDisplay as { type?: unknown }).type === 'task_execution'
+    ) {
+      await this.emitTaskUsageFromResultDisplay(
+        resultDisplay as AgentResultDisplay,
+      );
+    }
+  }
+
+  /**
+   * Emits token usage from a AgentResultDisplay execution summary, if present.
+   */
+  private async emitTaskUsageFromResultDisplay(
+    resultDisplay: AgentResultDisplay,
+  ): Promise<void> {
+    const summary = resultDisplay.executionSummary;
+    if (!summary) {
+      return;
+    }
+
+    const usageMetadata: GenerateContentResponseUsageMetadata = {};
+
+    if (Number.isFinite(summary.inputTokens)) {
+      usageMetadata.promptTokenCount = summary.inputTokens;
+    }
+    if (Number.isFinite(summary.outputTokens)) {
+      usageMetadata.candidatesTokenCount = summary.outputTokens;
+    }
+    if (Number.isFinite(summary.thoughtTokens)) {
+      usageMetadata.thoughtsTokenCount = summary.thoughtTokens;
+    }
+    if (Number.isFinite(summary.cachedTokens)) {
+      usageMetadata.cachedContentTokenCount = summary.cachedTokens;
+    }
+    if (Number.isFinite(summary.totalTokens)) {
+      usageMetadata.totalTokenCount = summary.totalTokens;
+    }
+
+    // Only emit if we captured at least one token metric
+    if (Object.keys(usageMetadata).length > 0) {
+      await this.messageEmitter.emitUsageMetadata(usageMetadata);
+    }
   }
 
   /**
@@ -205,5 +269,14 @@ export class HistoryReplayer {
       }
     }
     return '';
+  }
+
+  private setActiveRecordId(recordId: string | null, timestamp?: string): void {
+    const context = this.ctx as unknown as {
+      setActiveRecordId?: (id: string | null, timestamp?: string) => void;
+    };
+    if (typeof context.setActiveRecordId === 'function') {
+      context.setActiveRecordId(recordId, timestamp);
+    }
   }
 }

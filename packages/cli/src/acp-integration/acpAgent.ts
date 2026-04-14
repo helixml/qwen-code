@@ -1,40 +1,77 @@
 /**
  * @license
- * Copyright 2025 Qwen
+ * Copyright 2025 Qwen Team
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import type { ReadableStream, WritableStream } from 'node:stream/web';
-
-import type { Config, ConversationRecord } from '@qwen-code/qwen-code-core';
 import {
   APPROVAL_MODE_INFO,
   APPROVAL_MODES,
   AuthType,
   clearCachedCredentialFile,
+  createDebugLogger,
+  QwenOAuth2Event,
+  qwenOAuth2Events,
   MCPServerConfig,
   SessionService,
-  buildApiHistoryFromConversation,
+  tokenLimit,
+  type Config,
+  type ConversationRecord,
+  type DeviceAuthorizationData,
 } from '@qwen-code/qwen-code-core';
-import type { ApprovalModeValue } from './schema.js';
-import * as acp from './acp.js';
+import {
+  AgentSideConnection,
+  RequestError,
+  ndJsonStream,
+  PROTOCOL_VERSION,
+} from '@agentclientprotocol/sdk';
+import type {
+  Agent,
+  AuthenticateRequest,
+  AuthMethod,
+  CancelNotification,
+  ClientCapabilities,
+  InitializeRequest,
+  InitializeResponse,
+  ListSessionsRequest,
+  ListSessionsResponse,
+  LoadSessionRequest,
+  LoadSessionResponse,
+  McpServer,
+  McpServerStdio,
+  NewSessionRequest,
+  NewSessionResponse,
+  PromptRequest,
+  PromptResponse,
+  SessionConfigOption,
+  SessionInfo,
+  SessionModeState,
+  SetSessionConfigOptionRequest,
+  SetSessionConfigOptionResponse,
+  SetSessionModelRequest,
+  SetSessionModelResponse,
+  SetSessionModeRequest,
+  SetSessionModeResponse,
+} from '@agentclientprotocol/sdk';
+import { buildAuthMethods } from './authMethods.js';
 import { AcpFileSystemService } from './service/filesystem.js';
 import { Readable, Writable } from 'node:stream';
 import type { LoadedSettings } from '../config/settings.js';
-import { SettingScope } from '../config/settings.js';
+import { loadSettings, SettingScope } from '../config/settings.js';
+import type { ApprovalModeValue } from './session/types.js';
 import { z } from 'zod';
-import { ExtensionStorage, type Extension } from '../config/extension.js';
 import type { CliArgs } from '../config/config.js';
 import { loadCliConfig } from '../config/config.js';
-import { ExtensionEnablementManager } from '../config/extensions/extensionEnablement.js';
-
-// Import the modular Session class
 import { Session } from './session/Session.js';
+import { formatAcpModelId } from '../utils/acpModelUtils.js';
+import { runWithAcpRuntimeOutputDir } from './runtimeOutputDirContext.js';
+import { runExitCleanup } from '../utils/cleanup.js';
+
+const debugLogger = createDebugLogger('ACP_AGENT');
 
 export async function runAcpAgent(
   config: Config,
   settings: LoadedSettings,
-  extensions: Extension[],
   argv: CliArgs,
 ) {
   const stdout = Writable.toWeb(process.stdout) as WritableStream;
@@ -46,69 +83,82 @@ export async function runAcpAgent(
   console.info = console.error;
   console.debug = console.error;
 
-  new acp.AgentSideConnection(
-    (client: acp.Client) =>
-      new GeminiAgent(config, settings, extensions, argv, client),
-    stdout,
-    stdin,
+  const stream = ndJsonStream(stdout, stdin);
+  const connection = new AgentSideConnection(
+    (conn) => new QwenAgent(config, settings, argv, conn),
+    stream,
   );
+
+  // Handle SIGTERM/SIGINT for graceful shutdown.
+  // Without this, signal handlers registered elsewhere in the CLI
+  // (e.g., stdin raw mode restoration) override the default exit behavior,
+  // causing the ACP process to ignore termination signals.
+  let shuttingDown = false;
+  const shutdownHandler = () => {
+    if (shuttingDown) return;
+    shuttingDown = true;
+    debugLogger.debug('[ACP] Shutdown signal received, closing streams');
+    try {
+      process.stdin.destroy();
+    } catch {
+      // stdin may already be closed
+    }
+    try {
+      process.stdout.destroy();
+    } catch {
+      // stdout may already be closed
+    }
+    // Clean up child processes (MCP servers, etc.) and force exit.
+    // Without this, orphan subprocesses keep the Node.js event loop alive
+    // and the CLI process never terminates after the IDE disconnects.
+    runExitCleanup()
+      .catch((err) => {
+        debugLogger.error('[ACP] Cleanup error:', err);
+      })
+      .finally(() => {
+        process.exit(0);
+      });
+  };
+  process.on('SIGTERM', shutdownHandler);
+  process.on('SIGINT', shutdownHandler);
+
+  await connection.closed;
+
+  process.off('SIGTERM', shutdownHandler);
+  process.off('SIGINT', shutdownHandler);
 }
 
-class GeminiAgent {
+function toStdioServer(server: McpServer): McpServerStdio | undefined {
+  if ('command' in server && 'args' in server && 'env' in server) {
+    return server as McpServerStdio;
+  }
+  return undefined;
+}
+
+class QwenAgent implements Agent {
   private sessions: Map<string, Session> = new Map();
-  private clientCapabilities: acp.ClientCapabilities | undefined;
+  private clientCapabilities: ClientCapabilities | undefined;
 
   constructor(
     private config: Config,
     private settings: LoadedSettings,
-    private extensions: Extension[],
     private argv: CliArgs,
-    private client: acp.Client,
+    private connection: AgentSideConnection,
   ) {}
 
-  async initialize(
-    args: acp.InitializeRequest,
-  ): Promise<acp.InitializeResponse> {
+  async initialize(args: InitializeRequest): Promise<InitializeResponse> {
     this.clientCapabilities = args.clientCapabilities;
-    const authMethods = [
-      {
-        id: AuthType.USE_OPENAI,
-        name: 'Use OpenAI API key',
-        description:
-          'Requires setting the `OPENAI_API_KEY` environment variable',
-      },
-      {
-        id: AuthType.QWEN_OAUTH,
-        name: 'Qwen OAuth',
-        description:
-          'OAuth authentication for Qwen models with 2000 daily requests',
-      },
-    ];
-
-    // Get current approval mode from config
-    const currentApprovalMode = this.config.getApprovalMode();
-
-    // Build available modes from shared APPROVAL_MODE_INFO
-    const availableModes = APPROVAL_MODES.map((mode) => ({
-      id: mode as ApprovalModeValue,
-      name: APPROVAL_MODE_INFO[mode].name,
-      description: APPROVAL_MODE_INFO[mode].description,
-    }));
-
+    const authMethods = buildAuthMethods();
     const version = process.env['CLI_VERSION'] || process.version;
 
     return {
-      protocolVersion: acp.PROTOCOL_VERSION,
+      protocolVersion: PROTOCOL_VERSION,
       agentInfo: {
         name: 'qwen-code',
         title: 'Qwen Code',
         version,
       },
       authMethods,
-      modes: {
-        currentModeId: currentApprovalMode as ApprovalModeValue,
-        availableModes,
-      },
       agentCapabilities: {
         loadSession: true,
         promptCapabilities: {
@@ -116,144 +166,191 @@ class GeminiAgent {
           audio: true,
           embeddedContext: true,
         },
-        // Advertise session/list capability (ACP protocol v0.10.0)
         sessionCapabilities: {
           list: {},
+          resume: {},
         },
       },
     };
   }
 
-  async authenticate({ methodId }: acp.AuthenticateRequest): Promise<void> {
+  async authenticate({ methodId }: AuthenticateRequest): Promise<void> {
     const method = z.nativeEnum(AuthType).parse(methodId);
 
+    let authUri: string | undefined;
+    const authUriHandler = (deviceAuth: DeviceAuthorizationData) => {
+      authUri = deviceAuth.verification_uri_complete;
+      void this.connection.extNotification('authenticate/update', {
+        _meta: { authUri },
+      });
+    };
+
+    if (method === AuthType.QWEN_OAUTH) {
+      qwenOAuth2Events.once(QwenOAuth2Event.AuthUri, authUriHandler);
+    }
+
     await clearCachedCredentialFile();
-    await this.config.refreshAuth(method);
-    this.settings.setValue(
-      SettingScope.User,
-      'security.auth.selectedType',
-      method,
-    );
+    try {
+      await this.config.refreshAuth(method);
+      this.settings.setValue(
+        SettingScope.User,
+        'security.auth.selectedType',
+        method,
+      );
+    } finally {
+      if (method === AuthType.QWEN_OAUTH) {
+        qwenOAuth2Events.off(QwenOAuth2Event.AuthUri, authUriHandler);
+      }
+    }
   }
 
   async newSession({
     cwd,
     mcpServers,
-  }: acp.NewSessionRequest): Promise<acp.NewSessionResponse> {
+  }: NewSessionRequest): Promise<NewSessionResponse> {
     const config = await this.newSessionConfig(cwd, mcpServers);
     await this.ensureAuthenticated(config);
     this.setupFileSystem(config);
 
     const session = await this.createAndStoreSession(config);
+    const availableModels = this.buildAvailableModels(config);
+    const modesData = this.buildModesData(config);
+    const configOptions = this.buildConfigOptions(config);
 
     return {
       sessionId: session.getId(),
+      models: availableModels,
+      modes: modesData,
+      configOptions,
     };
   }
 
-  async newSessionConfig(
-    cwd: string,
-    mcpServers: acp.McpServer[],
-    sessionId?: string,
-  ): Promise<Config> {
-    const mergedMcpServers = { ...this.settings.merged.mcpServers };
-
-    for (const server of mcpServers) {
-      // ACP MCP servers use a discriminated union with "type" field:
-      // - type: "http" → streamable HTTP transport (url goes to httpUrl)
-      // - type: "sse" → SSE transport (url goes to url)
-      // - no type → stdio transport (command, args, env)
-      // See: https://agentclientprotocol.com/protocol/draft/schema#mcpserver
-
-      // Check if this is a tagged variant (has "type" field)
-      const serverType =
-        'type' in server ? (server as { type: string }).type : undefined;
-
-      if (serverType === 'http' || serverType === 'sse') {
-        // HTTP or SSE transport
-        const httpServer = server as {
-          name: string;
-          url: string;
-          headers: Array<{ name: string; value: string }>;
-        };
-
-        // Convert headers array to Record<string, string>
-        const headers: Record<string, string> = {};
-        for (const { name: headerName, value } of httpServer.headers) {
-          headers[headerName] = value;
-        }
-
-        // MCPServerConfig: url is for SSE, httpUrl is for streamable HTTP
-        mergedMcpServers[httpServer.name] = new MCPServerConfig(
-          undefined, // command (not used)
-          undefined, // args (not used)
-          undefined, // env (not used)
-          undefined, // cwd (not used)
-          serverType === 'sse' ? httpServer.url : undefined, // SSE transport URL
-          serverType === 'http' ? httpServer.url : undefined, // Streamable HTTP transport URL
-          Object.keys(headers).length > 0 ? headers : undefined,
-        );
-      } else {
-        // Stdio transport (untagged)
-        const stdioServer = server as {
-          name: string;
-          command: string;
-          args?: string[];
-          env?: Array<{ name: string; value: string }>;
-        };
-
-        // Convert env array to Record<string, string>
-        const env: Record<string, string> = {};
-        if (stdioServer.env) {
-          for (const { name: envName, value } of stdioServer.env) {
-            env[envName] = value;
-          }
-        }
-
-        mergedMcpServers[stdioServer.name] = new MCPServerConfig(
-          stdioServer.command,
-          stdioServer.args,
-          Object.keys(env).length > 0 ? env : undefined,
-          cwd,
-          undefined, // url (not used)
-          undefined, // httpUrl (not used)
-          undefined, // headers (not used)
-        );
-      }
-    }
-
-    const settings = { ...this.settings.merged, mcpServers: mergedMcpServers };
-
-    const argvForSession = {
-      ...this.argv,
-      resume: sessionId,
-      continue: false,
-    };
-
-    const config = await loadCliConfig(
-      settings,
-      this.extensions,
-      new ExtensionEnablementManager(
-        ExtensionStorage.getUserExtensionsDir(),
-        this.argv.extensions,
-      ),
-      argvForSession,
-      cwd,
+  async loadSession(params: LoadSessionRequest): Promise<LoadSessionResponse> {
+    const exists = await runWithAcpRuntimeOutputDir(
+      this.settings,
+      params.cwd,
+      async () => {
+        const sessionService = new SessionService(params.cwd);
+        return sessionService.sessionExists(params.sessionId);
+      },
     );
 
-    await config.initialize();
-    return config;
+    const config = await this.newSessionConfig(
+      params.cwd,
+      params.mcpServers,
+      params.sessionId,
+      exists,
+    );
+    await this.ensureAuthenticated(config);
+    this.setupFileSystem(config);
+
+    const sessionData = config.getResumedSessionData();
+    await this.createAndStoreSession(config, sessionData?.conversation);
+
+    const modesData = this.buildModesData(config);
+    const availableModels = this.buildAvailableModels(config);
+    const configOptions = this.buildConfigOptions(config);
+
+    return {
+      modes: modesData,
+      models: availableModels,
+      configOptions,
+    };
   }
 
-  async cancel(params: acp.CancelNotification): Promise<void> {
+  async unstable_listSessions(
+    params: ListSessionsRequest,
+  ): Promise<ListSessionsResponse> {
+    const cwd = params.cwd || process.cwd();
+    const numericCursor = params.cursor ? Number(params.cursor) : undefined;
+    const result = await runWithAcpRuntimeOutputDir(this.settings, cwd, () => {
+      const sessionService = new SessionService(cwd);
+      return sessionService.listSessions({
+        cursor: Number.isNaN(numericCursor) ? undefined : numericCursor,
+      });
+    });
+
+    const sessions: SessionInfo[] = result.items.map((item) => ({
+      cwd: item.cwd,
+      sessionId: item.sessionId,
+      title: item.prompt || '(session)',
+      updatedAt: new Date(item.mtime).toISOString(),
+    }));
+
+    return {
+      sessions,
+      nextCursor:
+        result.nextCursor != null ? String(result.nextCursor) : undefined,
+    };
+  }
+
+  async setSessionMode(
+    params: SetSessionModeRequest,
+  ): Promise<SetSessionModeResponse | void> {
     const session = this.sessions.get(params.sessionId);
     if (!session) {
-      throw new Error(`Session not found: ${params.sessionId}`);
+      throw RequestError.invalidParams(
+        undefined,
+        `Session not found for id: ${params.sessionId}`,
+      );
     }
-    await session.cancelPendingPrompt();
+    return session.setMode(params);
   }
 
-  async prompt(params: acp.PromptRequest): Promise<acp.PromptResponse> {
+  async unstable_setSessionModel(
+    params: SetSessionModelRequest,
+  ): Promise<SetSessionModelResponse | void> {
+    const session = this.sessions.get(params.sessionId);
+    if (!session) {
+      throw RequestError.invalidParams(
+        undefined,
+        `Session not found for id: ${params.sessionId}`,
+      );
+    }
+    return await session.setModel(params);
+  }
+
+  async setSessionConfigOption(
+    params: SetSessionConfigOptionRequest,
+  ): Promise<SetSessionConfigOptionResponse> {
+    const { sessionId, configId, value } = params;
+
+    const session = this.sessions.get(sessionId);
+    if (!session) {
+      throw RequestError.invalidParams(
+        undefined,
+        `Session not found for id: ${sessionId}`,
+      );
+    }
+
+    switch (configId) {
+      case 'mode': {
+        await this.setSessionMode({
+          sessionId,
+          modeId: value as string,
+        });
+        break;
+      }
+      case 'model': {
+        await this.unstable_setSessionModel({
+          sessionId,
+          modelId: value as string,
+        });
+        break;
+      }
+      default:
+        throw RequestError.invalidParams(
+          undefined,
+          `Unsupported configId: ${configId}`,
+        );
+    }
+
+    return {
+      configOptions: this.buildConfigOptions(session.getConfig()),
+    };
+  }
+
+  async prompt(params: PromptRequest): Promise<PromptResponse> {
     const session = this.sessions.get(params.sessionId);
     if (!session) {
       throw new Error(`Session not found: ${params.sessionId}`);
@@ -261,104 +358,137 @@ class GeminiAgent {
     return session.prompt(params);
   }
 
-  async loadSession(
-    params: acp.LoadSessionRequest,
-  ): Promise<acp.LoadSessionResponse> {
-    console.error(
-      `🔄 [ACP SESSION LOAD] Loading session ${params.sessionId} for cwd: ${params.cwd}`,
-    );
-    const sessionService = new SessionService(params.cwd);
-    const exists = await sessionService.sessionExists(params.sessionId);
-    console.error(`🔄 [ACP SESSION LOAD] Session exists check: ${exists}`);
-    if (!exists) {
-      console.error(
-        `❌ [ACP SESSION LOAD] Session not found: ${params.sessionId}`,
-      );
-      throw acp.RequestError.invalidParams(
-        `Session not found for id: ${params.sessionId}`,
-      );
-    }
-
-    const config = await this.newSessionConfig(
-      params.cwd,
-      params.mcpServers,
-      params.sessionId,
-    );
-    await this.ensureAuthenticated(config);
-    this.setupFileSystem(config);
-
-    const sessionData = config.getResumedSessionData();
-    console.error(
-      `🔄 [ACP SESSION LOAD] Got session data: ${sessionData ? 'yes' : 'no'}, messages: ${sessionData?.conversation?.messages?.length ?? 0}`,
-    );
-    if (!sessionData) {
-      console.error(`❌ [ACP SESSION LOAD] Failed to get session data`);
-      throw acp.RequestError.internalError(
-        `Failed to load session data for id: ${params.sessionId}`,
-      );
-    }
-
-    console.error(
-      `🔄 [ACP SESSION LOAD] Calling createAndStoreSession with ${sessionData.conversation?.messages?.length ?? 0} messages`,
-    );
-    await this.createAndStoreSession(config, sessionData.conversation);
-
-    console.error(`✅ [ACP SESSION LOAD] Session loaded successfully`);
-    return null;
-  }
-
-  async listSessions(
-    params: acp.ListSessionsRequest,
-  ): Promise<acp.ListSessionsResponse> {
-    const sessionService = new SessionService(params.cwd);
-    const result = await sessionService.listSessions({
-      cursor: params.cursor,
-      size: params.size,
-    });
-
-    // Map to official ACP protocol v0.10.0 format:
-    // - sessions array with SessionInfo objects
-    // - camelCase keys (ACP spec uses serde rename_all = "camelCase")
-    return {
-      sessions: result.items.map((item) => ({
-        sessionId: item.sessionId,
-        cwd: item.cwd,
-        title: item.prompt ? item.prompt.substring(0, 100) : undefined,
-        updatedAt: item.startTime,
-      })),
-      nextCursor: result.nextCursor?.toString(),
-    };
-  }
-
-  async setMode(params: acp.SetModeRequest): Promise<acp.SetModeResponse> {
+  async cancel(params: CancelNotification): Promise<void> {
     const session = this.sessions.get(params.sessionId);
     if (!session) {
       throw new Error(`Session not found: ${params.sessionId}`);
     }
-    return session.setMode(params);
+    await session.cancelPendingPrompt();
+  }
+
+  async extMethod(
+    method: string,
+    params: Record<string, unknown>,
+  ): Promise<Record<string, unknown>> {
+    if (method === 'getAccountInfo') {
+      const sessionId = params['sessionId'] as string | undefined;
+      const session = sessionId ? this.sessions.get(sessionId) : undefined;
+      const config = session ? session.getConfig() : this.config;
+      const cfg = config.getContentGeneratorConfig();
+      return {
+        authType: cfg?.authType ?? config.getAuthType() ?? null,
+        model: cfg?.model ?? config.getModel() ?? null,
+        baseUrl: cfg?.baseUrl ?? null,
+        apiKeyEnvKey: cfg?.apiKeyEnvKey ?? null,
+      };
+    }
+    throw RequestError.methodNotFound(method);
+  }
+
+  // --- private helpers ---
+
+  private async newSessionConfig(
+    cwd: string,
+    mcpServers: McpServer[],
+    sessionId?: string,
+    resume?: boolean,
+  ): Promise<Config> {
+    this.settings = loadSettings(cwd);
+    const mergedMcpServers = { ...this.settings.merged.mcpServers };
+
+    for (const server of mcpServers) {
+      const stdioServer = toStdioServer(server);
+      if (!stdioServer) continue;
+
+      const env: Record<string, string> = {};
+      for (const { name: envName, value } of stdioServer.env) {
+        env[envName] = value;
+      }
+      mergedMcpServers[stdioServer.name] = new MCPServerConfig(
+        stdioServer.command,
+        stdioServer.args,
+        env,
+        cwd,
+      );
+    }
+
+    const settings = { ...this.settings.merged, mcpServers: mergedMcpServers };
+    const argvForSession = {
+      ...this.argv,
+      ...(resume ? { resume: sessionId } : { sessionId }),
+      continue: false,
+    };
+
+    const config = await loadCliConfig(settings, argvForSession, cwd, []);
+    await config.initialize();
+    return config;
   }
 
   private async ensureAuthenticated(config: Config): Promise<void> {
-    const selectedType = this.settings.merged.security?.auth?.selectedType;
+    const selectedType = config.getModelsConfig().getCurrentAuthType();
     if (!selectedType) {
-      throw acp.RequestError.authRequired();
+      throw RequestError.authRequired(
+        { authMethods: this.pickAuthMethodsForAuthRequired() },
+        'Use Qwen Code CLI to authenticate first.',
+      );
     }
 
     try {
-      await config.refreshAuth(selectedType);
+      await config.refreshAuth(selectedType, true);
     } catch (e) {
-      console.error(`Authentication failed: ${e}`);
-      throw acp.RequestError.authRequired();
+      debugLogger.error(`Authentication failed: ${e}`);
+      throw RequestError.authRequired(
+        {
+          authMethods: this.pickAuthMethodsForAuthRequired(selectedType, e),
+        },
+        'Authentication failed: ' + (e as Error).message,
+      );
     }
   }
 
-  private setupFileSystem(config: Config): void {
-    if (!this.clientCapabilities?.fs) {
-      return;
+  private pickAuthMethodsForAuthRequired(
+    selectedType?: AuthType | string,
+    error?: unknown,
+  ): AuthMethod[] {
+    const authMethods = buildAuthMethods();
+    const errorMessage = this.extractErrorMessage(error);
+    if (
+      errorMessage?.includes('qwen-oauth') ||
+      errorMessage?.includes('Qwen OAuth')
+    ) {
+      const qwenOAuthMethods = authMethods.filter(
+        (m) => m.id === AuthType.QWEN_OAUTH,
+      );
+      return qwenOAuthMethods.length ? qwenOAuthMethods : authMethods;
     }
 
+    if (selectedType) {
+      const matched = authMethods.filter((m) => m.id === selectedType);
+      return matched.length ? matched : authMethods;
+    }
+
+    return authMethods;
+  }
+
+  private extractErrorMessage(error?: unknown): string | undefined {
+    if (error instanceof Error) return error.message;
+    if (
+      typeof error === 'object' &&
+      error != null &&
+      'message' in error &&
+      typeof error.message === 'string'
+    ) {
+      return error.message;
+    }
+    if (typeof error === 'string') return error;
+    return undefined;
+  }
+
+  private setupFileSystem(config: Config): void {
+    if (!this.clientCapabilities?.fs) return;
+
     const acpFileSystemService = new AcpFileSystemService(
-      this.client,
+      this.connection,
       config.getSessionId(),
       this.clientCapabilities.fs,
       config.getFileSystemService(),
@@ -373,55 +503,146 @@ class GeminiAgent {
     const sessionId = config.getSessionId();
     const geminiClient = config.getGeminiClient();
 
-    const history = conversation
-      ? buildApiHistoryFromConversation(conversation)
-      : undefined;
-    const chat = history
-      ? await geminiClient.startChat(history)
-      : await geminiClient.startChat();
+    if (!geminiClient.isInitialized()) {
+      await geminiClient.initialize();
+    }
+
+    const chat = geminiClient.getChat();
 
     const session = new Session(
       sessionId,
       chat,
       config,
-      this.client,
+      this.connection,
       this.settings,
     );
     this.sessions.set(sessionId, session);
 
-    // CRITICAL: Schedule updates to run AFTER the loadSession response is returned
-    // Zed only creates the AcpThread AFTER receiving the response, so any
-    // notifications sent during the request are lost.
-    //
-    // setImmediate runs after the current event loop iteration completes,
-    // which means the response will be sent first, then these callbacks fire.
-    // Flow: loadSession response sent → Zed creates thread → setImmediate fires → history replays
-    //
-    // IMPORTANT: Use a SINGLE setImmediate to ensure sequential execution.
-    // Multiple setImmediate calls can race with each other, causing interleaved
-    // or out-of-order updates that confuse Zed's state management.
+    setTimeout(async () => {
+      await session.sendAvailableCommandsUpdate();
+    }, 0);
 
-    setImmediate(async () => {
-      try {
-        // First, send available commands (quick)
-        await session.sendAvailableCommandsUpdate();
-
-        // Then, replay history if present (may take longer)
-        if (conversation && conversation.messages) {
-          console.error(
-            `🎬 [ACP SESSION LOAD] Replaying ${conversation.messages.length} messages (delayed until after response)`,
-          );
-          await session.replayHistory(conversation.messages);
-          console.error(`🎬 [ACP SESSION LOAD] History replay complete`);
-        }
-      } catch (error) {
-        console.error(
-          `❌ [ACP SESSION LOAD] Error during deferred updates:`,
-          error,
-        );
-      }
-    });
+    if (conversation && conversation.messages) {
+      await session.replayHistory(conversation.messages);
+    }
 
     return session;
+  }
+
+  private buildAvailableModels(config: Config): NewSessionResponse['models'] {
+    const rawCurrentModelId = (
+      config.getModel() ||
+      this.config.getModel() ||
+      ''
+    ).trim();
+    const currentAuthType = config.getAuthType();
+    const allConfiguredModels = config.getAllConfiguredModels();
+
+    const activeRuntimeSnapshot = config.getActiveRuntimeModelSnapshot?.();
+    const currentModelId = activeRuntimeSnapshot
+      ? formatAcpModelId(
+          activeRuntimeSnapshot.id,
+          activeRuntimeSnapshot.authType,
+        )
+      : this.formatCurrentModelId(rawCurrentModelId, currentAuthType);
+
+    const mappedAvailableModels = allConfiguredModels.map((model) => {
+      const effectiveModelId =
+        model.isRuntimeModel && model.runtimeSnapshotId
+          ? model.runtimeSnapshotId
+          : model.id;
+
+      return {
+        modelId: formatAcpModelId(effectiveModelId, model.authType),
+        name: model.label,
+        description: model.description ?? null,
+        _meta: {
+          contextLimit: model.contextWindowSize ?? tokenLimit(model.id),
+        },
+      };
+    });
+
+    return {
+      currentModelId,
+      availableModels: mappedAvailableModels,
+    };
+  }
+
+  private buildModesData(config: Config): SessionModeState {
+    const currentApprovalMode = config.getApprovalMode();
+
+    const availableModes = APPROVAL_MODES.map((mode) => ({
+      id: mode as ApprovalModeValue,
+      name: APPROVAL_MODE_INFO[mode].name,
+      description: APPROVAL_MODE_INFO[mode].description,
+    }));
+
+    return {
+      currentModeId: currentApprovalMode as ApprovalModeValue,
+      availableModes,
+    };
+  }
+
+  private buildConfigOptions(config: Config): SessionConfigOption[] {
+    const currentApprovalMode = config.getApprovalMode();
+    const allConfiguredModels = config.getAllConfiguredModels();
+    const rawCurrentModelId = (config.getModel() || '').trim();
+    const currentAuthType = config.getAuthType?.();
+
+    const activeRuntimeSnapshot = config.getActiveRuntimeModelSnapshot?.();
+    const currentModelId = activeRuntimeSnapshot
+      ? formatAcpModelId(
+          activeRuntimeSnapshot.id,
+          activeRuntimeSnapshot.authType,
+        )
+      : this.formatCurrentModelId(rawCurrentModelId, currentAuthType);
+
+    const modeOptions = APPROVAL_MODES.map((mode) => ({
+      value: mode,
+      name: APPROVAL_MODE_INFO[mode].name,
+      description: APPROVAL_MODE_INFO[mode].description,
+    }));
+
+    const modeConfigOption: SessionConfigOption = {
+      id: 'mode',
+      name: 'Mode',
+      description: 'Session permission mode',
+      category: 'mode',
+      type: 'select' as const,
+      currentValue: currentApprovalMode,
+      options: modeOptions,
+    };
+
+    const modelOptions = allConfiguredModels.map((model) => {
+      const effectiveModelId =
+        model.isRuntimeModel && model.runtimeSnapshotId
+          ? model.runtimeSnapshotId
+          : model.id;
+      return {
+        value: formatAcpModelId(effectiveModelId, model.authType),
+        name: model.label,
+        description: model.description ?? '',
+      };
+    });
+
+    const modelConfigOption: SessionConfigOption = {
+      id: 'model',
+      name: 'Model',
+      description: 'AI model to use',
+      category: 'model',
+      type: 'select' as const,
+      currentValue: currentModelId,
+      options: modelOptions,
+    };
+
+    return [modeConfigOption, modelConfigOption];
+  }
+
+  private formatCurrentModelId(
+    baseModelId: string,
+    authType?: AuthType,
+  ): string {
+    if (!baseModelId) return baseModelId;
+    return authType ? formatAcpModelId(baseModelId, authType) : baseModelId;
   }
 }

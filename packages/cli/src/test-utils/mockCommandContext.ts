@@ -55,11 +55,15 @@ export const createMockCommandContext = (
       setDebugMessage: vi.fn(),
       pendingItem: null,
       setPendingItem: vi.fn(),
+      btwItem: null,
+      setBtwItem: vi.fn(),
+      cancelBtw: vi.fn(),
+      btwAbortControllerRef: { current: null },
       loadHistory: vi.fn(),
-      toggleCorgiMode: vi.fn(),
       toggleVimEnabled: vi.fn(),
       extensionsUpdateState: new Map(),
       setExtensionsUpdateState: vi.fn(),
+      reloadCommands: vi.fn(),
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
     } as any,
     session: {

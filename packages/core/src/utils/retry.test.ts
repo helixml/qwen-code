@@ -8,6 +8,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import type { HttpError } from './retry.js';
 import { retryWithBackoff } from './retry.js';
+import { getErrorStatus } from './errors.js';
 import { setSimulate429 } from './testUtils.js';
 import { AuthType } from '../core/contentGenerator.js';
 
@@ -100,38 +101,38 @@ describe('retryWithBackoff', () => {
     expect(mockFn).toHaveBeenCalledTimes(3);
   });
 
-  it('should default to 5 maxAttempts if no options are provided', async () => {
-    // This function will fail more than 5 times to ensure all retries are used.
+  it('should default to 7 maxAttempts if no options are provided', async () => {
+    // This function will fail more than 7 times to ensure all retries are used.
     const mockFn = createFailingFunction(10);
 
     const promise = retryWithBackoff(mockFn);
 
-    // Expect it to fail with the error from the 5th attempt.
+    // Expect it to fail with the error from the 7th attempt.
     // eslint-disable-next-line vitest/valid-expect
     const assertionPromise = expect(promise).rejects.toThrow(
-      'Simulated error attempt 5',
+      'Simulated error attempt 7',
     );
     await vi.runAllTimersAsync();
     await assertionPromise;
 
-    expect(mockFn).toHaveBeenCalledTimes(5);
+    expect(mockFn).toHaveBeenCalledTimes(7);
   });
 
-  it('should default to 5 maxAttempts if options.maxAttempts is undefined', async () => {
-    // This function will fail more than 5 times to ensure all retries are used.
+  it('should default to 7 maxAttempts if options.maxAttempts is undefined', async () => {
+    // This function will fail more than 7 times to ensure all retries are used.
     const mockFn = createFailingFunction(10);
 
     const promise = retryWithBackoff(mockFn, { maxAttempts: undefined });
 
-    // Expect it to fail with the error from the 5th attempt.
+    // Expect it to fail with the error from the 7th attempt.
     // eslint-disable-next-line vitest/valid-expect
     const assertionPromise = expect(promise).rejects.toThrow(
-      'Simulated error attempt 5',
+      'Simulated error attempt 7',
     );
     await vi.runAllTimersAsync();
     await assertionPromise;
 
-    expect(mockFn).toHaveBeenCalledTimes(5);
+    expect(mockFn).toHaveBeenCalledTimes(7);
   });
 
   it('should not retry if shouldRetry returns false', async () => {
@@ -285,173 +286,6 @@ describe('retryWithBackoff', () => {
     });
   });
 
-  describe('Flash model fallback for OAuth users', () => {
-    it('should trigger fallback for OAuth personal users after persistent 429 errors', async () => {
-      const fallbackCallback = vi.fn().mockResolvedValue('gemini-2.5-flash');
-
-      let fallbackOccurred = false;
-      const mockFn = vi.fn().mockImplementation(async () => {
-        if (!fallbackOccurred) {
-          const error: HttpError = new Error('Rate limit exceeded');
-          error.status = 429;
-          throw error;
-        }
-        return 'success';
-      });
-
-      const promise = retryWithBackoff(mockFn, {
-        maxAttempts: 3,
-        initialDelayMs: 100,
-        onPersistent429: async (authType?: string) => {
-          fallbackOccurred = true;
-          return await fallbackCallback(authType);
-        },
-        authType: 'oauth-personal',
-      });
-
-      // Advance all timers to complete retries
-      await vi.runAllTimersAsync();
-
-      // Should succeed after fallback
-      await expect(promise).resolves.toBe('success');
-
-      // Verify callback was called with correct auth type
-      expect(fallbackCallback).toHaveBeenCalledWith('oauth-personal');
-
-      // Should retry again after fallback
-      expect(mockFn).toHaveBeenCalledTimes(3); // 2 initial attempts + 1 after fallback
-    });
-
-    it('should NOT trigger fallback for API key users', async () => {
-      const fallbackCallback = vi.fn();
-
-      const mockFn = vi.fn(async () => {
-        const error: HttpError = new Error('Rate limit exceeded');
-        error.status = 429;
-        throw error;
-      });
-
-      const promise = retryWithBackoff(mockFn, {
-        maxAttempts: 3,
-        initialDelayMs: 100,
-        onPersistent429: fallbackCallback,
-        authType: 'gemini-api-key',
-      });
-
-      // Handle the promise properly to avoid unhandled rejections
-      const resultPromise = promise.catch((error) => error);
-      await vi.runAllTimersAsync();
-      const result = await resultPromise;
-
-      // Should fail after all retries without fallback
-      expect(result).toBeInstanceOf(Error);
-      expect(result.message).toBe('Rate limit exceeded');
-
-      // Callback should not be called for API key users
-      expect(fallbackCallback).not.toHaveBeenCalled();
-    });
-
-    it('should reset attempt counter and continue after successful fallback', async () => {
-      let fallbackCalled = false;
-      const fallbackCallback = vi.fn().mockImplementation(async () => {
-        fallbackCalled = true;
-        return 'gemini-2.5-flash';
-      });
-
-      const mockFn = vi.fn().mockImplementation(async () => {
-        if (!fallbackCalled) {
-          const error: HttpError = new Error('Rate limit exceeded');
-          error.status = 429;
-          throw error;
-        }
-        return 'success';
-      });
-
-      const promise = retryWithBackoff(mockFn, {
-        maxAttempts: 3,
-        initialDelayMs: 100,
-        onPersistent429: fallbackCallback,
-        authType: 'oauth-personal',
-      });
-
-      await vi.runAllTimersAsync();
-
-      await expect(promise).resolves.toBe('success');
-      expect(fallbackCallback).toHaveBeenCalledOnce();
-    });
-
-    it('should continue with original error if fallback is rejected', async () => {
-      const fallbackCallback = vi.fn().mockResolvedValue(null); // User rejected fallback
-
-      const mockFn = vi.fn(async () => {
-        const error: HttpError = new Error('Rate limit exceeded');
-        error.status = 429;
-        throw error;
-      });
-
-      const promise = retryWithBackoff(mockFn, {
-        maxAttempts: 3,
-        initialDelayMs: 100,
-        onPersistent429: fallbackCallback,
-        authType: 'oauth-personal',
-      });
-
-      // Handle the promise properly to avoid unhandled rejections
-      const resultPromise = promise.catch((error) => error);
-      await vi.runAllTimersAsync();
-      const result = await resultPromise;
-
-      // Should fail with original error when fallback is rejected
-      expect(result).toBeInstanceOf(Error);
-      expect(result.message).toBe('Rate limit exceeded');
-      expect(fallbackCallback).toHaveBeenCalledWith(
-        'oauth-personal',
-        expect.any(Error),
-      );
-    });
-
-    it('should handle mixed error types (only count consecutive 429s)', async () => {
-      const fallbackCallback = vi.fn().mockResolvedValue('gemini-2.5-flash');
-      let attempts = 0;
-      let fallbackOccurred = false;
-
-      const mockFn = vi.fn().mockImplementation(async () => {
-        attempts++;
-        if (fallbackOccurred) {
-          return 'success';
-        }
-        if (attempts === 1) {
-          // First attempt: 500 error (resets consecutive count)
-          const error: HttpError = new Error('Server error');
-          error.status = 500;
-          throw error;
-        } else {
-          // Remaining attempts: 429 errors
-          const error: HttpError = new Error('Rate limit exceeded');
-          error.status = 429;
-          throw error;
-        }
-      });
-
-      const promise = retryWithBackoff(mockFn, {
-        maxAttempts: 5,
-        initialDelayMs: 100,
-        onPersistent429: async (authType?: string) => {
-          fallbackOccurred = true;
-          return await fallbackCallback(authType);
-        },
-        authType: 'oauth-personal',
-      });
-
-      await vi.runAllTimersAsync();
-
-      await expect(promise).resolves.toBe('success');
-
-      // Should trigger fallback after 2 consecutive 429s (attempts 2-3)
-      expect(fallbackCallback).toHaveBeenCalledWith('oauth-personal');
-    });
-  });
-
   describe('Qwen OAuth 429 error handling', () => {
     it('should retry for Qwen OAuth 429 errors that are throttling-related', async () => {
       const errorWith429: HttpError = new Error('Rate limit exceeded');
@@ -479,7 +313,10 @@ describe('retryWithBackoff', () => {
     });
 
     it('should throw immediately for Qwen OAuth with insufficient_quota message', async () => {
-      const errorWithInsufficientQuota = new Error('insufficient_quota');
+      const errorWithInsufficientQuota = Object.assign(
+        new Error('Free allocated quota exceeded.'),
+        { status: 429, code: 'insufficient_quota' },
+      );
 
       const fn = vi.fn().mockRejectedValue(errorWithInsufficientQuota);
 
@@ -490,15 +327,18 @@ describe('retryWithBackoff', () => {
         authType: AuthType.QWEN_OAUTH,
       });
 
-      await expect(promise).rejects.toThrow(/Qwen API quota exceeded/);
+      await expect(promise).rejects.toThrow(
+        /Qwen OAuth free tier quota exceeded/,
+      );
 
       // Should be called only once (no retries)
       expect(fn).toHaveBeenCalledTimes(1);
     });
 
     it('should throw immediately for Qwen OAuth with free allocated quota exceeded message', async () => {
-      const errorWithQuotaExceeded = new Error(
-        'Free allocated quota exceeded.',
+      const errorWithQuotaExceeded = Object.assign(
+        new Error('Free allocated quota exceeded.'),
+        { status: 429, code: 'insufficient_quota' },
       );
 
       const fn = vi.fn().mockRejectedValue(errorWithQuotaExceeded);
@@ -510,7 +350,9 @@ describe('retryWithBackoff', () => {
         authType: AuthType.QWEN_OAUTH,
       });
 
-      await expect(promise).rejects.toThrow(/Qwen API quota exceeded/);
+      await expect(promise).rejects.toThrow(
+        /Qwen OAuth free tier quota exceeded/,
+      );
 
       // Should be called only once (no retries)
       expect(fn).toHaveBeenCalledTimes(1);
@@ -570,7 +412,10 @@ describe('retryWithBackoff', () => {
     });
 
     it('should throw immediately for Qwen OAuth with quota message', async () => {
-      const errorWithQuota = new Error('quota exceeded');
+      const errorWithQuota = Object.assign(
+        new Error('Free allocated quota exceeded.'),
+        { status: 429, code: 'insufficient_quota' },
+      );
 
       const fn = vi.fn().mockRejectedValue(errorWithQuota);
 
@@ -581,7 +426,9 @@ describe('retryWithBackoff', () => {
         authType: AuthType.QWEN_OAUTH,
       });
 
-      await expect(promise).rejects.toThrow(/Qwen API quota exceeded/);
+      await expect(promise).rejects.toThrow(
+        /Qwen OAuth free tier quota exceeded/,
+      );
 
       // Should be called only once (no retries)
       expect(fn).toHaveBeenCalledTimes(1);
@@ -612,5 +459,115 @@ describe('retryWithBackoff', () => {
       // Should be called 3 times (2 failures + 1 success)
       expect(fn).toHaveBeenCalledTimes(3);
     });
+  });
+});
+
+describe('getErrorStatus', () => {
+  it('should extract status from error.status (OpenAI/Anthropic/Gemini style)', () => {
+    expect(getErrorStatus({ status: 429 })).toBe(429);
+    expect(getErrorStatus({ status: 500 })).toBe(500);
+    expect(getErrorStatus({ status: 503 })).toBe(503);
+    expect(getErrorStatus({ status: 400 })).toBe(400);
+  });
+
+  it('should extract status from error.statusCode', () => {
+    expect(getErrorStatus({ statusCode: 429 })).toBe(429);
+    expect(getErrorStatus({ statusCode: 502 })).toBe(502);
+  });
+
+  it('should extract status from error.response.status (axios style)', () => {
+    expect(getErrorStatus({ response: { status: 429 } })).toBe(429);
+    expect(getErrorStatus({ response: { status: 503 } })).toBe(503);
+  });
+
+  it('should extract status from error.error.code (nested error style)', () => {
+    expect(getErrorStatus({ error: { code: 429 } })).toBe(429);
+    expect(getErrorStatus({ error: { code: 500 } })).toBe(500);
+  });
+
+  it('should prefer status over statusCode over response.status over error.code', () => {
+    expect(
+      getErrorStatus({
+        status: 429,
+        statusCode: 500,
+        response: { status: 502 },
+        error: { code: 503 },
+      }),
+    ).toBe(429);
+
+    expect(
+      getErrorStatus({
+        statusCode: 500,
+        response: { status: 502 },
+        error: { code: 503 },
+      }),
+    ).toBe(500);
+
+    expect(
+      getErrorStatus({ response: { status: 502 }, error: { code: 503 } }),
+    ).toBe(502);
+  });
+
+  it('should return undefined for out-of-range status codes', () => {
+    expect(getErrorStatus({ status: 0 })).toBeUndefined();
+    expect(getErrorStatus({ status: 99 })).toBeUndefined();
+    expect(getErrorStatus({ status: 600 })).toBeUndefined();
+    expect(getErrorStatus({ status: -1 })).toBeUndefined();
+  });
+
+  it('should return undefined for non-numeric status values', () => {
+    expect(getErrorStatus({ status: 'not_a_number' })).toBeUndefined();
+    expect(
+      getErrorStatus({ error: { code: 'invalid_api_key' } }),
+    ).toBeUndefined();
+  });
+
+  it('should return undefined for null, undefined, and non-object values', () => {
+    expect(getErrorStatus(null)).toBeUndefined();
+    expect(getErrorStatus(undefined)).toBeUndefined();
+    expect(getErrorStatus(true)).toBeUndefined();
+    expect(getErrorStatus(429)).toBeUndefined();
+    expect(getErrorStatus('500')).toBeUndefined();
+  });
+
+  it('should handle Error instances with a status property', () => {
+    const error: HttpError = new Error('Too Many Requests');
+    error.status = 429;
+    expect(getErrorStatus(error)).toBe(429);
+  });
+
+  it('should return undefined for Error instances without a status', () => {
+    expect(getErrorStatus(new Error('generic error'))).toBeUndefined();
+  });
+
+  it('should return undefined for empty objects', () => {
+    expect(getErrorStatus({})).toBeUndefined();
+    expect(getErrorStatus({ response: {} })).toBeUndefined();
+    expect(getErrorStatus({ error: {} })).toBeUndefined();
+  });
+
+  it('should parse HTTP_STATUS/NNN from streamed SSE error messages', () => {
+    // DashScope throttling: error opens with 200 OK, then surfaces as an SSE
+    // error frame. The SDK preserves the raw SSE text in error.message.
+    const dashscopeThrottle = new Error(
+      'id:1\nevent:error\n:HTTP_STATUS/429\ndata:{"request_id":"x","code":"Throttling.AllocationQuota","message":"Allocated quota exceeded"}',
+    );
+    expect(getErrorStatus(dashscopeThrottle)).toBe(429);
+
+    expect(getErrorStatus(new Error('upstream :HTTP_STATUS/503'))).toBe(503);
+  });
+
+  it('should prefer numeric status fields over HTTP_STATUS/NNN in message', () => {
+    const error: HttpError = new Error(':HTTP_STATUS/500');
+    error.status = 429;
+    expect(getErrorStatus(error)).toBe(429);
+  });
+
+  it('should ignore HTTP_STATUS/NNN outside the valid range', () => {
+    expect(getErrorStatus(new Error('HTTP_STATUS/999'))).toBeUndefined();
+  });
+
+  it('should not match HTTP_STATUS/NNN when adjacent to more digits', () => {
+    expect(getErrorStatus(new Error('HTTP_STATUS/4291'))).toBeUndefined();
   });
 });

@@ -5,6 +5,9 @@
  */
 
 import { execSync, spawn, spawnSync } from 'node:child_process';
+import { createDebugLogger } from './debugLogger.js';
+
+const debugLogger = createDebugLogger('EDITOR');
 
 export type EditorType =
   | 'vscode'
@@ -36,7 +39,7 @@ interface DiffCommand {
   args: string[];
 }
 
-function commandExists(cmd: string): boolean {
+export function commandExists(cmd: string): boolean {
   try {
     execSync(
       process.platform === 'win32' ? `where.exe ${cmd}` : `command -v ${cmd}`,
@@ -52,7 +55,7 @@ function commandExists(cmd: string): boolean {
  * Editor command configurations for different platforms.
  * Each editor can have multiple possible command names, listed in order of preference.
  */
-const editorCommands: Record<
+export const editorCommands: Record<
   EditorType,
   { win32: string[]; default: string[] }
 > = {
@@ -174,7 +177,7 @@ export async function openDiff(
 ): Promise<void> {
   const diffCommand = getDiffCommand(oldPath, newPath, editor);
   if (!diffCommand) {
-    console.error('No diff tool available. Install a supported editor.');
+    debugLogger.error('No diff tool available. Install a supported editor.');
     return;
   }
 
@@ -217,7 +220,7 @@ export async function openDiff(
       });
     });
   } catch (error) {
-    console.error(error);
+    debugLogger.error(error);
     throw error;
   }
 }

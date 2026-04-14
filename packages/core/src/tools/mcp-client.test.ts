@@ -23,6 +23,11 @@ import {
 } from './mcp-client.js';
 import type { ToolRegistry } from './tool-registry.js';
 
+const mockExistsSync = vi.hoisted(() => vi.fn(() => true));
+
+vi.mock('node:fs', () => ({
+  existsSync: mockExistsSync,
+}));
 vi.mock('@modelcontextprotocol/sdk/client/stdio.js');
 vi.mock('@modelcontextprotocol/sdk/client/index.js');
 vi.mock('@google/genai');
@@ -78,9 +83,6 @@ describe('mcp-client', () => {
     });
 
     it('should not skip tools even if a parameter is missing a type', async () => {
-      const consoleWarnSpy = vi
-        .spyOn(console, 'warn')
-        .mockImplementation(() => {});
       const mockedClient = {
         connect: vi.fn(),
         discover: vi.fn(),
@@ -137,14 +139,9 @@ describe('mcp-client', () => {
       await client.connect();
       await client.discover({} as Config);
       expect(mockedToolRegistry.registerTool).toHaveBeenCalledTimes(2);
-      expect(consoleWarnSpy).not.toHaveBeenCalled();
-      consoleWarnSpy.mockRestore();
     });
 
     it('should handle errors when discovering prompts', async () => {
-      const consoleErrorSpy = vi
-        .spyOn(console, 'error')
-        .mockImplementation(() => {});
       const mockedClient = {
         connect: vi.fn(),
         discover: vi.fn(),
@@ -178,10 +175,6 @@ describe('mcp-client', () => {
       await expect(client.discover({} as Config)).rejects.toThrow(
         'No prompts or tools found on the server.',
       );
-      expect(consoleErrorSpy).toHaveBeenCalledWith(
-        `Error discovering prompts from test-server: Test error`,
-      );
-      consoleErrorSpy.mockRestore();
     });
   });
   describe('appendMcpServerCommand', () => {
@@ -217,9 +210,9 @@ describe('mcp-client', () => {
           false,
         );
 
-        expect(transport).toEqual(
-          new StreamableHTTPClientTransport(new URL('http://test-server'), {}),
-        );
+        expect(transport).toBeInstanceOf(StreamableHTTPClientTransport);
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        expect((transport as any)._url).toEqual(new URL('http://test-server'));
       });
 
       it('with headers', async () => {
@@ -232,13 +225,13 @@ describe('mcp-client', () => {
           false,
         );
 
-        expect(transport).toEqual(
-          new StreamableHTTPClientTransport(new URL('http://test-server'), {
-            requestInit: {
-              headers: { Authorization: 'derp' },
-            },
-          }),
-        );
+        expect(transport).toBeInstanceOf(StreamableHTTPClientTransport);
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        expect((transport as any)._url).toEqual(new URL('http://test-server'));
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        expect((transport as any)._requestInit?.headers).toEqual({
+          Authorization: 'derp',
+        });
       });
     });
 
@@ -251,9 +244,9 @@ describe('mcp-client', () => {
           },
           false,
         );
-        expect(transport).toEqual(
-          new SSEClientTransport(new URL('http://test-server'), {}),
-        );
+        expect(transport).toBeInstanceOf(SSEClientTransport);
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        expect((transport as any)._url).toEqual(new URL('http://test-server'));
       });
 
       it('with headers', async () => {
@@ -266,13 +259,13 @@ describe('mcp-client', () => {
           false,
         );
 
-        expect(transport).toEqual(
-          new SSEClientTransport(new URL('http://test-server'), {
-            requestInit: {
-              headers: { Authorization: 'derp' },
-            },
-          }),
-        );
+        expect(transport).toBeInstanceOf(SSEClientTransport);
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        expect((transport as any)._url).toEqual(new URL('http://test-server'));
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        expect((transport as any)._requestInit?.headers).toEqual({
+          Authorization: 'derp',
+        });
       });
     });
 
@@ -299,6 +292,46 @@ describe('mcp-client', () => {
         env: { ...process.env, FOO: 'bar' },
         stderr: 'pipe',
       });
+    });
+
+    it('should connect via command without cwd', async () => {
+      const mockedTransport = vi
+        .spyOn(SdkClientStdioLib, 'StdioClientTransport')
+        .mockReturnValue({} as SdkClientStdioLib.StdioClientTransport);
+
+      await createTransport(
+        'test-server',
+        {
+          command: 'test-command',
+          args: ['--foo', 'bar'],
+        },
+        false,
+      );
+
+      expect(mockedTransport).toHaveBeenCalledWith({
+        command: 'test-command',
+        args: ['--foo', 'bar'],
+        cwd: undefined,
+        env: expect.any(Object),
+        stderr: 'pipe',
+      });
+    });
+
+    it('should throw if cwd does not exist', async () => {
+      mockExistsSync.mockReturnValueOnce(false);
+
+      await expect(
+        createTransport(
+          'test-server',
+          {
+            command: 'test-command',
+            cwd: '/nonexistent/path',
+          },
+          false,
+        ),
+      ).rejects.toThrow(
+        "MCP server 'test-server': configured cwd does not exist: /nonexistent/path",
+      );
     });
 
     describe('useGoogleCredentialProvider', () => {

@@ -18,6 +18,8 @@ import {
   InputFormat,
   uiTelemetryService,
   parseAndFormatApiError,
+  createDebugLogger,
+  SendMessageType,
 } from '@qwen-code/qwen-code-core';
 import type { Content, Part, PartListUnion } from '@google/genai';
 import type { CLIUserMessage, PermissionMode } from './nonInteractive/types.js';
@@ -34,13 +36,58 @@ import {
   handleCancellationError,
   handleMaxTurnsExceededError,
 } from './utils/errors.js';
+
+const debugLogger = createDebugLogger('NON_INTERACTIVE_CLI');
 import {
   normalizePartList,
   extractPartsFromUserMessage,
   buildSystemMessage,
-  createTaskToolProgressHandler,
+  createToolProgressHandler,
+  createAgentToolProgressHandler,
   computeUsageFromMetrics,
 } from './utils/nonInteractiveHelpers.js';
+
+/**
+ * Emits a final message for slash command results.
+ * Note: systemMessage should already be emitted before calling this function.
+ */
+async function emitNonInteractiveFinalMessage(params: {
+  message: string;
+  isError: boolean;
+  adapter: JsonOutputAdapterInterface;
+  config: Config;
+  startTimeMs: number;
+}): Promise<void> {
+  const { message, isError, adapter, config } = params;
+
+  // JSON output mode: emit assistant message and result
+  // (systemMessage should already be emitted by caller)
+  adapter.startAssistantMessage();
+  adapter.processEvent({
+    type: GeminiEventType.Content,
+    value: message,
+  } as unknown as Parameters<JsonOutputAdapterInterface['processEvent']>[0]);
+  adapter.finalizeAssistantMessage();
+
+  const metrics = uiTelemetryService.getMetrics();
+  const usage = computeUsageFromMetrics(metrics);
+  const outputFormat = config.getOutputFormat();
+  const stats =
+    outputFormat === OutputFormat.JSON
+      ? uiTelemetryService.getMetrics()
+      : undefined;
+
+  adapter.emitResult({
+    isError,
+    durationMs: Date.now() - params.startTimeMs,
+    apiDurationMs: 0,
+    numTurns: 0,
+    errorMessage: isError ? message : undefined,
+    usage,
+    stats,
+    summary: message,
+  });
+}
 
 /**
  * Provides optional overrides for `runNonInteractive` execution.
@@ -69,18 +116,18 @@ export async function runNonInteractive(
 ): Promise<void> {
   return promptIdContext.run(prompt_id, async () => {
     // Create output adapter based on format
-    let adapter: JsonOutputAdapterInterface | undefined;
+    let adapter: JsonOutputAdapterInterface;
     const outputFormat = config.getOutputFormat();
 
     if (options.adapter) {
       adapter = options.adapter;
-    } else if (outputFormat === OutputFormat.JSON) {
-      adapter = new JsonOutputAdapter(config);
     } else if (outputFormat === OutputFormat.STREAM_JSON) {
       adapter = new StreamJsonOutputAdapter(
         config,
         config.getIncludePartialMessages(),
       );
+    } else {
+      adapter = new JsonOutputAdapter(config);
     }
 
     // Get readonly values once at the start
@@ -103,9 +150,7 @@ export async function runNonInteractive(
 
     // Setup signal handlers for graceful shutdown
     const shutdownHandler = () => {
-      if (config.getDebugMode()) {
-        console.error('[runNonInteractive] Shutdown signal received');
-      }
+      debugLogger.debug('[runNonInteractive] Shutdown signal received');
       abortController.abort();
     };
 
@@ -114,6 +159,14 @@ export async function runNonInteractive(
 
       process.on('SIGINT', shutdownHandler);
       process.on('SIGTERM', shutdownHandler);
+
+      // Emit systemMessage first (always the first message in JSON mode)
+      const systemMessage = await buildSystemMessage(
+        config,
+        sessionId,
+        permissionMode,
+      );
+      adapter.emitMessage(systemMessage);
 
       let initialPartList: PartListUnion | null = extractPartsFromUserMessage(
         options.userMessage,
@@ -128,10 +181,45 @@ export async function runNonInteractive(
             config,
             settings,
           );
-          if (slashCommandResult) {
-            // A slash command can replace the prompt entirely; fall back to @-command processing otherwise.
-            initialPartList = slashCommandResult as PartListUnion;
-            slashHandled = true;
+          switch (slashCommandResult.type) {
+            case 'submit_prompt':
+              // A slash command can replace the prompt entirely; fall back to @-command processing otherwise.
+              initialPartList = slashCommandResult.content;
+              slashHandled = true;
+              break;
+            case 'message': {
+              // systemMessage already emitted above
+              await emitNonInteractiveFinalMessage({
+                message: slashCommandResult.content,
+                isError: slashCommandResult.messageType === 'error',
+                adapter,
+                config,
+                startTimeMs: startTime,
+              });
+              return;
+            }
+            case 'stream_messages':
+              throw new FatalInputError(
+                'Stream messages mode is not supported in non-interactive CLI',
+              );
+            case 'unsupported': {
+              await emitNonInteractiveFinalMessage({
+                message: slashCommandResult.reason,
+                isError: true,
+                adapter,
+                config,
+                startTimeMs: startTime,
+              });
+              return;
+            }
+            case 'no_command':
+              break;
+            default: {
+              const _exhaustive: never = slashCommandResult;
+              throw new FatalInputError(
+                `Unhandled slash command result type: ${(_exhaustive as { type: string }).type}`,
+              );
+            }
           }
         }
 
@@ -139,7 +227,6 @@ export async function runNonInteractive(
           const { processedQuery, shouldProceed } = await handleAtCommand({
             query: input,
             config,
-            addItem: (_item, _timestamp) => 0,
             onDebugMessage: () => {},
             messageId: Date.now(),
             signal: abortController.signal,
@@ -163,16 +250,8 @@ export async function runNonInteractive(
       const initialParts = normalizePartList(initialPartList);
       let currentMessages: Content[] = [{ role: 'user', parts: initialParts }];
 
-      if (adapter) {
-        const systemMessage = await buildSystemMessage(
-          config,
-          sessionId,
-          permissionMode,
-        );
-        adapter.emitMessage(systemMessage);
-      }
-
       let isFirstTurn = true;
+      let modelOverride: string | undefined;
       while (true) {
         turnCount++;
         if (
@@ -188,51 +267,43 @@ export async function runNonInteractive(
           currentMessages[0]?.parts || [],
           abortController.signal,
           prompt_id,
-          { isContinuation: !isFirstTurn },
+          {
+            type: isFirstTurn
+              ? SendMessageType.UserQuery
+              : SendMessageType.ToolResult,
+            modelOverride,
+          },
         );
         isFirstTurn = false;
 
         // Start assistant message for this turn
-        if (adapter) {
-          adapter.startAssistantMessage();
-        }
+        adapter.startAssistantMessage();
 
         for await (const event of responseStream) {
           if (abortController.signal.aborted) {
             handleCancellationError(config);
           }
-
-          if (adapter) {
-            // Use adapter for all event processing
-            adapter.processEvent(event);
-            if (event.type === GeminiEventType.ToolCallRequest) {
-              toolCallRequests.push(event.value);
-            }
-          } else {
-            // Text output mode - direct stdout
-            if (event.type === GeminiEventType.Thought) {
-              process.stdout.write(event.value.description);
-            } else if (event.type === GeminiEventType.Content) {
-              process.stdout.write(event.value);
-            } else if (event.type === GeminiEventType.ToolCallRequest) {
-              toolCallRequests.push(event.value);
-            } else if (event.type === GeminiEventType.Error) {
-              // Format and output the error message for text mode
-              const errorText = parseAndFormatApiError(
-                event.value.error,
-                config.getContentGeneratorConfig()?.authType,
-                undefined,
-                config.getModel(),
-              );
-              process.stderr.write(`${errorText}\n`);
-            }
+          // Use adapter for all event processing
+          adapter.processEvent(event);
+          if (event.type === GeminiEventType.ToolCallRequest) {
+            toolCallRequests.push(event.value);
+          }
+          if (
+            outputFormat === OutputFormat.TEXT &&
+            event.type === GeminiEventType.Error
+          ) {
+            const errorText = parseAndFormatApiError(
+              event.value.error,
+              config.getContentGeneratorConfig()?.authType,
+            );
+            process.stderr.write(`${errorText}\n`);
+            // Throw error to exit with non-zero code
+            throw new Error(errorText);
           }
         }
 
         // Finalize assistant message
-        if (adapter) {
-          adapter.finalizeAssistantMessage();
-        }
+        adapter.finalizeAssistantMessage();
         totalApiDurationMs += Date.now() - apiStartTime;
 
         if (toolCallRequests.length > 0) {
@@ -250,30 +321,29 @@ export async function runNonInteractive(
                 ? options.controlService.permission.getToolCallUpdateCallback()
                 : undefined;
 
-            // Only pass outputUpdateHandler for Task tool
-            const isTaskTool = finalRequestInfo.name === 'task';
-            const taskToolProgress = isTaskTool
-              ? createTaskToolProgressHandler(
+            // Build outputUpdateHandler for this tool call.
+            // Agent tool has its own complex handler (subagent messages).
+            // All other tools with canUpdateOutput=true (e.g., MCP tools)
+            // get a generic handler that emits progress via the adapter.
+            const isAgentTool = finalRequestInfo.name === 'agent';
+            const { handler: outputUpdateHandler } = isAgentTool
+              ? createAgentToolProgressHandler(
                   config,
                   finalRequestInfo.callId,
                   adapter,
                 )
-              : undefined;
-            const taskToolProgressHandler = taskToolProgress?.handler;
+              : createToolProgressHandler(finalRequestInfo, adapter);
+
             const toolResponse = await executeToolCall(
               config,
               finalRequestInfo,
               abortController.signal,
-              isTaskTool && taskToolProgressHandler
-                ? {
-                    outputUpdateHandler: taskToolProgressHandler,
-                    onToolCallsUpdate: toolCallUpdateCallback,
-                  }
-                : toolCallUpdateCallback
-                  ? {
-                      onToolCallsUpdate: toolCallUpdateCallback,
-                    }
-                  : undefined,
+              {
+                outputUpdateHandler,
+                ...(toolCallUpdateCallback && {
+                  onToolCallsUpdate: toolCallUpdateCallback,
+                }),
+              },
             );
 
             // Note: In JSON mode, subagent messages are automatically added to the main
@@ -295,61 +365,206 @@ export async function runNonInteractive(
               );
             }
 
-            if (adapter) {
-              adapter.emitToolResult(finalRequestInfo, toolResponse);
-            }
+            adapter.emitToolResult(finalRequestInfo, toolResponse);
 
             if (toolResponse.responseParts) {
               toolResponseParts.push(...toolResponse.responseParts);
             }
+
+            // Capture model override from skill tool results.
+            // Use `in` so that undefined (from inherit/no-model skills) clears a prior override,
+            // while non-skill tools (field absent) leave the current override intact.
+            if ('modelOverride' in toolResponse) {
+              modelOverride = toolResponse.modelOverride;
+            }
           }
           currentMessages = [{ role: 'user', parts: toolResponseParts }];
         } else {
-          // For JSON and STREAM_JSON modes, compute usage from metrics
-          if (adapter) {
-            const metrics = uiTelemetryService.getMetrics();
-            const usage = computeUsageFromMetrics(metrics);
-            // Get stats for JSON format output
-            const stats =
-              outputFormat === OutputFormat.JSON
-                ? uiTelemetryService.getMetrics()
-                : undefined;
-            adapter.emitResult({
-              isError: false,
-              durationMs: Date.now() - startTime,
-              apiDurationMs: totalApiDurationMs,
-              numTurns: turnCount,
-              usage,
-              stats,
+          // No more tool calls — check if cron jobs are keeping us alive
+          const scheduler = !config.isCronEnabled()
+            ? null
+            : config.getCronScheduler();
+          if (scheduler && scheduler.size > 0) {
+            // Start the scheduler and wait for all jobs to complete or be deleted.
+            // Each fired prompt is processed as a new turn through the same loop.
+            await new Promise<void>((resolve) => {
+              const cronQueue: string[] = [];
+              let processing = false;
+
+              const checkDone = () => {
+                if (scheduler.size === 0 && !processing) {
+                  scheduler.stop();
+                  resolve();
+                }
+              };
+
+              const drainQueue = async () => {
+                if (processing) return;
+                processing = true;
+                try {
+                  while (cronQueue.length > 0) {
+                    const cronPrompt = cronQueue.shift()!;
+                    turnCount++;
+                    let cronMessages: Content[] = [
+                      { role: 'user', parts: [{ text: cronPrompt }] },
+                    ];
+                    let cronIsFirstTurn = true;
+                    let cronModelOverride: string | undefined;
+
+                    while (true) {
+                      const cronToolCallRequests: ToolCallRequestInfo[] = [];
+                      const cronApiStartTime = Date.now();
+                      const cronStream = geminiClient.sendMessageStream(
+                        cronMessages[0]?.parts || [],
+                        abortController.signal,
+                        prompt_id,
+                        {
+                          type: cronIsFirstTurn
+                            ? SendMessageType.Cron
+                            : SendMessageType.ToolResult,
+                          modelOverride: cronModelOverride,
+                        },
+                      );
+                      cronIsFirstTurn = false;
+
+                      adapter.startAssistantMessage();
+
+                      for await (const event of cronStream) {
+                        if (abortController.signal.aborted) {
+                          const summary = scheduler.getExitSummary();
+                          scheduler.stop();
+                          if (summary) {
+                            process.stderr.write(summary + '\n');
+                          }
+                          resolve();
+                          return;
+                        }
+                        adapter.processEvent(event);
+                        if (event.type === GeminiEventType.ToolCallRequest) {
+                          cronToolCallRequests.push(event.value);
+                        }
+                      }
+
+                      adapter.finalizeAssistantMessage();
+                      totalApiDurationMs += Date.now() - cronApiStartTime;
+
+                      if (cronToolCallRequests.length > 0) {
+                        const cronToolResponseParts: Part[] = [];
+
+                        for (const requestInfo of cronToolCallRequests) {
+                          const isAgentTool = requestInfo.name === 'agent';
+                          const { handler: outputUpdateHandler } = isAgentTool
+                            ? createAgentToolProgressHandler(
+                                config,
+                                requestInfo.callId,
+                                adapter,
+                              )
+                            : createToolProgressHandler(requestInfo, adapter);
+
+                          const toolResponse = await executeToolCall(
+                            config,
+                            requestInfo,
+                            abortController.signal,
+                            { outputUpdateHandler },
+                          );
+
+                          if (toolResponse.error) {
+                            handleToolError(
+                              requestInfo.name,
+                              toolResponse.error,
+                              config,
+                              toolResponse.errorType || 'TOOL_EXECUTION_ERROR',
+                              typeof toolResponse.resultDisplay === 'string'
+                                ? toolResponse.resultDisplay
+                                : undefined,
+                            );
+                          }
+
+                          adapter.emitToolResult(requestInfo, toolResponse);
+
+                          if (toolResponse.responseParts) {
+                            cronToolResponseParts.push(
+                              ...toolResponse.responseParts,
+                            );
+                          }
+
+                          if ('modelOverride' in toolResponse) {
+                            cronModelOverride = toolResponse.modelOverride;
+                          }
+                        }
+                        cronMessages = [
+                          { role: 'user', parts: cronToolResponseParts },
+                        ];
+                      } else {
+                        break;
+                      }
+                    }
+                  }
+                } catch (error) {
+                  debugLogger.error('Error processing cron prompt:', error);
+                } finally {
+                  processing = false;
+                  checkDone();
+                }
+              };
+
+              scheduler.start((job: { prompt: string }) => {
+                cronQueue.push(job.prompt);
+                void drainQueue();
+              });
+
+              // Also check immediately in case jobs were already deleted
+              checkDone();
             });
-          } else {
-            // Text output mode - no usage needed
-            process.stdout.write('\n');
           }
+
+          const metrics = uiTelemetryService.getMetrics();
+          const usage = computeUsageFromMetrics(metrics);
+          // Get stats for JSON format output
+          const stats =
+            outputFormat === OutputFormat.JSON
+              ? uiTelemetryService.getMetrics()
+              : undefined;
+          adapter.emitResult({
+            isError: false,
+            durationMs: Date.now() - startTime,
+            apiDurationMs: totalApiDurationMs,
+            numTurns: turnCount,
+            usage,
+            stats,
+          });
           return;
         }
       }
     } catch (error) {
+      // Ensure message_start / message_stop (and content_block events) are
+      // properly paired even when an error aborts the turn mid-stream.
+      // The call is safe when no message was started (throws → caught) or
+      // when already finalized (idempotent guard inside the adapter).
+      try {
+        adapter.finalizeAssistantMessage();
+      } catch {
+        // Expected when no message was started or already finalized
+      }
+
       // For JSON and STREAM_JSON modes, compute usage from metrics
       const message = error instanceof Error ? error.message : String(error);
-      if (adapter) {
-        const metrics = uiTelemetryService.getMetrics();
-        const usage = computeUsageFromMetrics(metrics);
-        // Get stats for JSON format output
-        const stats =
-          outputFormat === OutputFormat.JSON
-            ? uiTelemetryService.getMetrics()
-            : undefined;
-        adapter.emitResult({
-          isError: true,
-          durationMs: Date.now() - startTime,
-          apiDurationMs: totalApiDurationMs,
-          numTurns: turnCount,
-          errorMessage: message,
-          usage,
-          stats,
-        });
-      }
+      const metrics = uiTelemetryService.getMetrics();
+      const usage = computeUsageFromMetrics(metrics);
+      // Get stats for JSON format output
+      const stats =
+        outputFormat === OutputFormat.JSON
+          ? uiTelemetryService.getMetrics()
+          : undefined;
+      adapter.emitResult({
+        isError: true,
+        durationMs: Date.now() - startTime,
+        apiDurationMs: totalApiDurationMs,
+        numTurns: turnCount,
+        errorMessage: message,
+        usage,
+        stats,
+      });
       handleError(error, config);
     } finally {
       process.stdout.removeListener('error', stdoutErrorHandler);
@@ -357,7 +572,7 @@ export async function runNonInteractive(
       process.removeListener('SIGINT', shutdownHandler);
       process.removeListener('SIGTERM', shutdownHandler);
       if (isTelemetrySdkInitialized()) {
-        await shutdownTelemetry(config);
+        await shutdownTelemetry();
       }
     }
   });

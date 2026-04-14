@@ -7,13 +7,15 @@
 import { createContext, useContext } from 'react';
 import type {
   HistoryItem,
+  HistoryItemBtw,
   ThoughtSummary,
-  ConsoleMessageItem,
   ShellConfirmationRequest,
   ConfirmationRequest,
   LoopDetectionConfirmationRequest,
   HistoryItemWithoutId,
   StreamingState,
+  SettingInputRequest,
+  PluginChoiceRequest,
 } from '../types.js';
 import type { QwenAuthState } from '../hooks/useQwenAuth.js';
 import type { CommandContext, SlashCommand } from '../commands/types.js';
@@ -22,23 +24,17 @@ import type {
   AuthType,
   IdeContext,
   ApprovalMode,
-  UserTierId,
   IdeInfo,
-  FallbackIntent,
 } from '@qwen-code/qwen-code-core';
 import type { DOMElement } from 'ink';
 import type { SessionStatsState } from '../contexts/SessionContext.js';
 import type { ExtensionUpdateState } from '../state/extensions.js';
 import type { UpdateObject } from '../utils/updateCheck.js';
 
-export interface ProQuotaDialogRequest {
-  failedModel: string;
-  fallbackModel: string;
-  resolve: (intent: FallbackIntent) => void;
-}
-
 import { type UseHistoryManagerReturn } from '../hooks/useHistoryManager.js';
 import { type RestartReason } from '../hooks/useIdeTrustListener.js';
+import { type CodingPlanUpdateRequest } from '../hooks/useCodingPlanUpdates.js';
+import { type ArenaDialogType } from '../hooks/useArenaCommand.js';
 
 export interface UIState {
   history: HistoryItem[];
@@ -54,19 +50,25 @@ export interface UIState {
   qwenAuthState: QwenAuthState;
   editorError: string | null;
   isEditorDialogOpen: boolean;
-  corgiMode: boolean;
   debugMessage: string;
   quittingMessages: HistoryItem[] | null;
   isSettingsDialogOpen: boolean;
   isModelDialogOpen: boolean;
+  isFastModelMode: boolean;
+  isTrustDialogOpen: boolean;
+  activeArenaDialog: ArenaDialogType;
   isPermissionsDialogOpen: boolean;
   isApprovalModeDialogOpen: boolean;
+  isResumeDialogOpen: boolean;
   slashCommands: readonly SlashCommand[];
   pendingSlashCommandHistoryItems: HistoryItemWithoutId[];
   commandContext: CommandContext;
   shellConfirmationRequest: ShellConfirmationRequest | null;
   confirmationRequest: ConfirmationRequest | null;
   confirmUpdateExtensionRequests: ConfirmationRequest[];
+  codingPlanUpdateRequest: CodingPlanUpdateRequest | undefined;
+  settingInputRequests: SettingInputRequest[];
+  pluginChoiceRequests: PluginChoiceRequest[];
   loopDetectionConfirmationRequest: LoopDetectionConfirmationRequest | null;
   geminiMdFileCount: number;
   streamingState: StreamingState;
@@ -80,11 +82,11 @@ export interface UIState {
   suggestionsWidth: number;
   isInputActive: boolean;
   shouldShowIdePrompt: boolean;
+  shouldShowCommandMigrationNudge: boolean;
+  commandMigrationTomlFiles: string[];
   isFolderTrustDialogOpen: boolean;
   isTrustedFolder: boolean | undefined;
   constrainHeight: boolean;
-  showErrorDetails: boolean;
-  filteredConsoleMessages: ConsoleMessageItem[];
   ideContextState: IdeContext | undefined;
   showToolDescriptions: boolean;
   ctrlCPressedOnce: boolean;
@@ -95,21 +97,18 @@ export interface UIState {
   historyRemountKey: number;
   messageQueue: string[];
   showAutoAcceptIndicator: ApprovalMode;
-  showWorkspaceMigrationDialog: boolean;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  workspaceExtensions: any[]; // Extension[]
   // Quota-related state
-  userTier: UserTierId | undefined;
-  proQuotaRequest: ProQuotaDialogRequest | null;
   currentModel: string;
   contextFileNames: string[];
-  errorCount: number;
   availableTerminalHeight: number | undefined;
   mainAreaWidth: number;
   staticAreaMaxItemHeight: number;
   staticExtraHeight: number;
   dialogsVisible: boolean;
   pendingHistoryItems: HistoryItemWithoutId[];
+  btwItem: HistoryItemBtw | null;
+  setBtwItem: (item: HistoryItemBtw | null) => void;
+  cancelBtw: () => void;
   nightly: boolean;
   branchName: string | undefined;
   sessionStats: SessionStatsState;
@@ -124,8 +123,6 @@ export interface UIState {
   extensionsUpdateState: Map<string, ExtensionUpdateState>;
   activePtyId: number | undefined;
   embeddedShellFocused: boolean;
-  // Vision switch dialog
-  isVisionSwitchDialogOpen: boolean;
   // Welcome back dialog
   showWelcomeBackDialog: boolean;
   welcomeBackInfo: {
@@ -136,6 +133,20 @@ export interface UIState {
   // Subagent dialogs
   isSubagentCreateDialogOpen: boolean;
   isAgentsManagerDialogOpen: boolean;
+  // Extensions manager dialog
+  isExtensionsManagerDialogOpen: boolean;
+  // MCP dialog
+  isMcpDialogOpen: boolean;
+  // Hooks dialog
+  isHooksDialogOpen: boolean;
+  // Feedback dialog
+  isFeedbackDialogOpen: boolean;
+  // Per-task token tracking
+  taskStartTokens: number;
+  // Prompt suggestion
+  promptSuggestion: string | null;
+  /** Dismiss prompt suggestion (clears state, aborts speculation) */
+  dismissPromptSuggestion: () => void;
 }
 
 export const UIStateContext = createContext<UIState | null>(null);

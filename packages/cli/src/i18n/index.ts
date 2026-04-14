@@ -1,6 +1,6 @@
 /**
  * @license
- * Copyright 2025 Qwen
+ * Copyright 2025 Qwen team
  * SPDX-License-Identifier: Apache-2.0
  */
 
@@ -8,18 +8,25 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { homedir } from 'node:os';
+import { writeStderrLine } from '../utils/stdioHelpers.js';
+import {
+  type SupportedLanguage,
+  SUPPORTED_LANGUAGES,
+  getLanguageNameFromLocale,
+} from './languages.js';
 
-export type SupportedLanguage = 'en' | 'zh' | string; // Allow custom language codes
+export type { SupportedLanguage };
+export { getLanguageNameFromLocale };
 
 // State
 let currentLanguage: SupportedLanguage = 'en';
-let translations: Record<string, string> = {};
+let translations: Record<string, string | string[]> = {};
 
 // Cache
-type TranslationDict = Record<string, string>;
+type TranslationValue = string | string[];
+type TranslationDict = Record<string, TranslationValue>;
 const translationCache: Record<string, TranslationDict> = {};
 const loadingPromises: Record<string, Promise<TranslationDict>> = {};
-
 // Path helpers
 const getBuiltinLocalesDir = (): string => {
   const __filename = fileURLToPath(import.meta.url);
@@ -49,12 +56,17 @@ const getLocalePath = (
 // Language detection
 export function detectSystemLanguage(): SupportedLanguage {
   const envLang = process.env['QWEN_CODE_LANG'] || process.env['LANG'];
-  if (envLang?.startsWith('zh')) return 'zh';
-  if (envLang?.startsWith('en')) return 'en';
+  if (envLang) {
+    for (const lang of SUPPORTED_LANGUAGES) {
+      if (envLang.startsWith(lang.code)) return lang.code;
+    }
+  }
 
   try {
     const locale = Intl.DateTimeFormat().resolvedOptions().locale;
-    if (locale.startsWith('zh')) return 'zh';
+    for (const lang of SUPPORTED_LANGUAGES) {
+      if (locale.startsWith(lang.code)) return lang.code;
+    }
   } catch {
     // Fallback to default
   }
@@ -133,16 +145,13 @@ async function loadTranslationsAsync(
       } catch (error) {
         // Log warning but continue to next directory
         if (isUser) {
-          console.warn(
-            `Failed to load translations from user directory for ${lang}:`,
-            error,
+          writeStderrLine(
+            `Failed to load translations from user directory for ${lang}: ${error instanceof Error ? error.message : String(error)}`,
           );
         } else {
-          console.warn(`Failed to load JS translations for ${lang}:`, error);
-          if (error instanceof Error) {
-            console.warn(`Error details: ${error.message}`);
-            console.warn(`Stack: ${error.stack}`);
-          }
+          writeStderrLine(
+            `Failed to load JS translations for ${lang}: ${error instanceof Error ? error.message : String(error)}`,
+          );
         }
         // Continue to next directory
         continue;
@@ -201,7 +210,7 @@ export function setLanguage(lang: SupportedLanguage | 'auto'): void {
     const userJsPath = getLocalePath(resolvedLang, true);
     const builtinJsPath = getLocalePath(resolvedLang, false);
     if (fs.existsSync(userJsPath) || fs.existsSync(builtinJsPath)) {
-      console.warn(
+      writeStderrLine(
         `Language file for ${resolvedLang} requires async loading. ` +
           `Use setLanguageAsync() instead, or call initializeI18n() first.`,
       );
@@ -222,7 +231,23 @@ export function getCurrentLanguage(): SupportedLanguage {
 
 export function t(key: string, params?: Record<string, string>): string {
   const translation = translations[key] ?? key;
+  if (Array.isArray(translation)) {
+    return key;
+  }
   return interpolate(translation, params);
+}
+
+/**
+ * Get a translation that is an array of strings.
+ * @param key The translation key
+ * @returns The array of strings, or an empty array if not found or not an array
+ */
+export function ta(key: string): string[] {
+  const translation = translations[key];
+  if (Array.isArray(translation)) {
+    return translation;
+  }
+  return [];
 }
 
 export async function initializeI18n(

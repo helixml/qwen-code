@@ -88,6 +88,10 @@ vi.mock('../../utils/cleanup.js', () => ({
   runExitCleanup: mockRunExitCleanup,
 }));
 
+vi.mock('./useKeypress.js', () => ({
+  useKeypress: vi.fn(),
+}));
+
 function createTestCommand(
   overrides: Partial<SlashCommand>,
   kind: CommandKind = CommandKind.BUILT_IN,
@@ -143,6 +147,7 @@ describe('useSlashCommandProcessor', () => {
         mockLoadHistory,
         vi.fn(), // refreshStatic
         vi.fn(), // toggleVimEnabled
+        false, // isProcessing
         setIsProcessing,
         vi.fn(), // setGeminiMdFileCount
         {
@@ -151,10 +156,20 @@ describe('useSlashCommandProcessor', () => {
           openEditorDialog: vi.fn(),
           openSettingsDialog: vi.fn(),
           openModelDialog: mockOpenModelDialog,
+          openTrustDialog: vi.fn(),
+          openPermissionsDialog: vi.fn(),
+          openApprovalModeDialog: vi.fn(),
+          openResumeDialog: vi.fn(),
           quit: mockSetQuittingMessages,
           setDebugMessage: vi.fn(),
-          toggleCorgiMode: vi.fn(),
+          dispatchExtensionStateUpdate: vi.fn(),
+          addConfirmUpdateExtensionRequest: vi.fn(),
+          openSubagentCreateDialog: vi.fn(),
+          openAgentsManagerDialog: vi.fn(),
         },
+        new Map(), // extensionsUpdateState
+        true, // isConfigInitialized
+        null, // logger
       ),
     );
 
@@ -460,7 +475,7 @@ describe('useSlashCommandProcessor', () => {
         name: 'loadwiththoughts',
         action: vi.fn().mockResolvedValue({
           type: 'load_history',
-          history: [{ type: MessageType.MODEL, text: 'response' }],
+          history: [{ type: MessageType.GEMINI, text: 'response' }],
           clientHistory: historyWithThoughts,
         }),
       });
@@ -905,19 +920,30 @@ describe('useSlashCommandProcessor', () => {
           mockClearItems,
           mockLoadHistory,
           vi.fn(), // refreshStatic
-          vi.fn(), // onDebugMessage
-          vi.fn(), // openThemeDialog
-          mockOpenAuthDialog,
-          vi.fn(), // openEditorDialog
-          vi.fn(), // toggleCorgiMode
-          mockSetQuittingMessages,
-          vi.fn(), // openSettingsDialog
-          vi.fn(), // openModelSelectionDialog
-          vi.fn(), // openSubagentCreateDialog
-          vi.fn(), // openAgentsManagerDialog
           vi.fn(), // toggleVimEnabled
+          false, // isProcessing
           vi.fn(), // setIsProcessing
           vi.fn(), // setGeminiMdFileCount
+          {
+            openAuthDialog: mockOpenAuthDialog,
+            openThemeDialog: mockOpenThemeDialog,
+            openEditorDialog: vi.fn(),
+            openSettingsDialog: vi.fn(),
+            openModelDialog: vi.fn(),
+            openTrustDialog: vi.fn(),
+            openPermissionsDialog: vi.fn(),
+            openApprovalModeDialog: vi.fn(),
+            openResumeDialog: vi.fn(),
+            quit: mockSetQuittingMessages,
+            setDebugMessage: vi.fn(),
+            dispatchExtensionStateUpdate: vi.fn(),
+            addConfirmUpdateExtensionRequest: vi.fn(),
+            openSubagentCreateDialog: vi.fn(),
+            openAgentsManagerDialog: vi.fn(),
+          },
+          new Map(), // extensionsUpdateState
+          true, // isConfigInitialized
+          null, // logger
         ),
       );
 

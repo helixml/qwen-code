@@ -11,7 +11,7 @@
  */
 
 import { mkdir, writeFile, readFile, rm, chmod } from 'node:fs/promises';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { existsSync } from 'node:fs';
 import type {
   SDKMessage,
@@ -41,6 +41,13 @@ export interface SDKTestHelperOptions {
    * Whether to create .qwen/settings.json
    */
   createQwenConfig?: boolean;
+  /**
+   * Whether to enable chat recording for this test.
+   * - Set to `true` to enable recording (needed for session-id duplicate detection tests)
+   * - Set to `false` or leave undefined to disable recording (default for most tests)
+   * This sets chatRecording in general settings.
+   */
+  chatRecording?: boolean;
 }
 
 /**
@@ -73,15 +80,27 @@ export class SDKTestHelper {
     await mkdir(this.testDir, { recursive: true });
 
     // Optionally create .qwen/settings.json for CLI configuration
-    if (options.createQwenConfig) {
+    if (options.createQwenConfig !== false) {
       const qwenDir = join(this.testDir, '.qwen');
       await mkdir(qwenDir, { recursive: true });
 
+      const optionsSettings = options.settings ?? {};
+      const generalSettings =
+        typeof optionsSettings['general'] === 'object' &&
+        optionsSettings['general'] !== null
+          ? (optionsSettings['general'] as Record<string, unknown>)
+          : {};
+
       const settings = {
+        ...optionsSettings,
         telemetry: {
           enabled: false, // SDK tests don't need telemetry
         },
-        ...options.settings,
+        general: {
+          ...generalSettings,
+          // Default to disabling chat recording unless explicitly enabled
+          ...(options.chatRecording !== true ? { chatRecording: false } : {}),
+        },
       };
 
       await writeFile(
@@ -102,6 +121,9 @@ export class SDKTestHelper {
       throw new Error('Test directory not initialized. Call setup() first.');
     }
     const filePath = join(this.testDir, fileName);
+    // Ensure parent directories exist before writing the file
+    const parentDir = dirname(filePath);
+    await mkdir(parentDir, { recursive: true });
     await writeFile(filePath, content, 'utf-8');
     return filePath;
   }
@@ -643,6 +665,29 @@ export function hasErrorToolResults(messages: SDKMessage[]): boolean {
 // ============================================================================
 // Streaming Input Utilities
 // ============================================================================
+
+export function createResultWaiter(expectedResults: number): {
+  waitForResult: (index: number) => Promise<void>;
+  notifyResult: () => void;
+} {
+  const resolvers: Array<() => void> = [];
+  const promises = Array.from({ length: expectedResults }, () => {
+    return new Promise<void>((resolve) => {
+      resolvers.push(resolve);
+    });
+  });
+  let resolvedCount = 0;
+
+  return {
+    waitForResult: (index: number) => promises[index],
+    notifyResult: () => {
+      if (resolvedCount < resolvers.length) {
+        resolvers[resolvedCount]?.();
+        resolvedCount += 1;
+      }
+    },
+  };
+}
 
 /**
  * Create a simple streaming input from an array of message contents

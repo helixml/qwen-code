@@ -7,13 +7,18 @@
 import type { Mock } from 'vitest';
 import { vi, describe, it, expect, beforeEach } from 'vitest';
 import { memoryCommand } from './memoryCommand.js';
-import type { SlashCommand, type CommandContext } from './types.js';
+import type { SlashCommand, CommandContext } from './types.js';
 import { createMockCommandContext } from '../../test-utils/mockCommandContext.js';
 import { MessageType } from '../types.js';
 import type { LoadedSettings } from '../../config/settings.js';
+import { readFile } from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
 import {
   getErrorMessage,
   loadServerHierarchicalMemory,
+  QWEN_DIR,
+  setGeminiMdFilename,
   type FileDiscoveryService,
   type LoadServerHierarchicalMemoryResponse,
 } from '@qwen-code/qwen-code-core';
@@ -31,7 +36,18 @@ vi.mock('@qwen-code/qwen-code-core', async (importOriginal) => {
   };
 });
 
+vi.mock('node:fs/promises', () => {
+  const readFile = vi.fn();
+  return {
+    readFile,
+    default: {
+      readFile,
+    },
+  };
+});
+
 const mockLoadServerHierarchicalMemory = loadServerHierarchicalMemory as Mock;
+const mockReadFile = readFile as unknown as Mock;
 
 describe('memoryCommand', () => {
   let mockContext: CommandContext;
@@ -52,6 +68,10 @@ describe('memoryCommand', () => {
     let mockGetGeminiMdFileCount: Mock;
 
     beforeEach(() => {
+      setGeminiMdFilename('QWEN.md');
+      mockReadFile.mockReset();
+      vi.restoreAllMocks();
+
       showCommand = getSubCommand('show');
 
       mockGetUserMemory = vi.fn();
@@ -101,6 +121,162 @@ describe('memoryCommand', () => {
         },
         expect.any(Number),
       );
+    });
+
+    it('should show project memory from the configured context file', async () => {
+      const projectCommand = showCommand.subCommands?.find(
+        (cmd) => cmd.name === '--project',
+      );
+      if (!projectCommand?.action) throw new Error('Command has no action');
+
+      setGeminiMdFilename('AGENTS.md');
+      vi.spyOn(process, 'cwd').mockReturnValue('/test/project');
+      mockReadFile.mockResolvedValue('project memory');
+
+      await projectCommand.action(mockContext, '');
+
+      const expectedProjectPath = path.join('/test/project', 'AGENTS.md');
+      expect(mockReadFile).toHaveBeenCalledWith(expectedProjectPath, 'utf-8');
+      expect(mockContext.ui.addItem).toHaveBeenCalledWith(
+        {
+          type: MessageType.INFO,
+          text: expect.stringContaining(expectedProjectPath),
+        },
+        expect.any(Number),
+      );
+    });
+
+    it('should show global memory from the configured context file', async () => {
+      const globalCommand = showCommand.subCommands?.find(
+        (cmd) => cmd.name === '--global',
+      );
+      if (!globalCommand?.action) throw new Error('Command has no action');
+
+      setGeminiMdFilename('AGENTS.md');
+      vi.spyOn(os, 'homedir').mockReturnValue('/home/user');
+      mockReadFile.mockResolvedValue('global memory');
+
+      await globalCommand.action(mockContext, '');
+
+      const expectedGlobalPath = path.join('/home/user', QWEN_DIR, 'AGENTS.md');
+      expect(mockReadFile).toHaveBeenCalledWith(expectedGlobalPath, 'utf-8');
+      expect(mockContext.ui.addItem).toHaveBeenCalledWith(
+        {
+          type: MessageType.INFO,
+          text: expect.stringContaining('Global memory content'),
+        },
+        expect.any(Number),
+      );
+    });
+
+    it('should fall back to AGENTS.md when QWEN.md does not exist for --project', async () => {
+      const projectCommand = showCommand.subCommands?.find(
+        (cmd) => cmd.name === '--project',
+      );
+      if (!projectCommand?.action) throw new Error('Command has no action');
+
+      setGeminiMdFilename(['QWEN.md', 'AGENTS.md']);
+      vi.spyOn(process, 'cwd').mockReturnValue('/test/project');
+      mockReadFile.mockImplementation(async (filePath: string) => {
+        if (filePath.endsWith('AGENTS.md')) return 'agents memory content';
+        throw new Error('ENOENT');
+      });
+
+      await projectCommand.action(mockContext, '');
+
+      const expectedPath = path.join('/test/project', 'AGENTS.md');
+      expect(mockReadFile).toHaveBeenCalledWith(expectedPath, 'utf-8');
+      expect(mockContext.ui.addItem).toHaveBeenCalledWith(
+        {
+          type: MessageType.INFO,
+          text: expect.stringContaining('agents memory content'),
+        },
+        expect.any(Number),
+      );
+    });
+
+    it('should fall back to AGENTS.md when QWEN.md does not exist for --global', async () => {
+      const globalCommand = showCommand.subCommands?.find(
+        (cmd) => cmd.name === '--global',
+      );
+      if (!globalCommand?.action) throw new Error('Command has no action');
+
+      setGeminiMdFilename(['QWEN.md', 'AGENTS.md']);
+      vi.spyOn(os, 'homedir').mockReturnValue('/home/user');
+      mockReadFile.mockImplementation(async (filePath: string) => {
+        if (filePath.endsWith('AGENTS.md')) return 'global agents memory';
+        throw new Error('ENOENT');
+      });
+
+      await globalCommand.action(mockContext, '');
+
+      const expectedPath = path.join('/home/user', QWEN_DIR, 'AGENTS.md');
+      expect(mockReadFile).toHaveBeenCalledWith(expectedPath, 'utf-8');
+      expect(mockContext.ui.addItem).toHaveBeenCalledWith(
+        {
+          type: MessageType.INFO,
+          text: expect.stringContaining('global agents memory'),
+        },
+        expect.any(Number),
+      );
+    });
+
+    it('should show content from both QWEN.md and AGENTS.md for --project when both exist', async () => {
+      const projectCommand = showCommand.subCommands?.find(
+        (cmd) => cmd.name === '--project',
+      );
+      if (!projectCommand?.action) throw new Error('Command has no action');
+
+      setGeminiMdFilename(['QWEN.md', 'AGENTS.md']);
+      vi.spyOn(process, 'cwd').mockReturnValue('/test/project');
+      mockReadFile.mockImplementation(async (filePath: string) => {
+        if (filePath.endsWith('QWEN.md')) return 'qwen memory';
+        if (filePath.endsWith('AGENTS.md')) return 'agents memory';
+        throw new Error('ENOENT');
+      });
+
+      await projectCommand.action(mockContext, '');
+
+      expect(mockReadFile).toHaveBeenCalledWith(
+        path.join('/test/project', 'QWEN.md'),
+        'utf-8',
+      );
+      expect(mockReadFile).toHaveBeenCalledWith(
+        path.join('/test/project', 'AGENTS.md'),
+        'utf-8',
+      );
+      const addItemCall = (mockContext.ui.addItem as Mock).mock.calls[0][0];
+      expect(addItemCall.text).toContain('qwen memory');
+      expect(addItemCall.text).toContain('agents memory');
+    });
+
+    it('should show content from both files for --global when both exist', async () => {
+      const globalCommand = showCommand.subCommands?.find(
+        (cmd) => cmd.name === '--global',
+      );
+      if (!globalCommand?.action) throw new Error('Command has no action');
+
+      setGeminiMdFilename(['QWEN.md', 'AGENTS.md']);
+      vi.spyOn(os, 'homedir').mockReturnValue('/home/user');
+      mockReadFile.mockImplementation(async (filePath: string) => {
+        if (filePath.endsWith('QWEN.md')) return 'global qwen memory';
+        if (filePath.endsWith('AGENTS.md')) return 'global agents memory';
+        throw new Error('ENOENT');
+      });
+
+      await globalCommand.action(mockContext, '');
+
+      expect(mockReadFile).toHaveBeenCalledWith(
+        path.join('/home/user', QWEN_DIR, 'QWEN.md'),
+        'utf-8',
+      );
+      expect(mockReadFile).toHaveBeenCalledWith(
+        path.join('/home/user', QWEN_DIR, 'AGENTS.md'),
+        'utf-8',
+      );
+      const addItemCall = (mockContext.ui.addItem as Mock).mock.calls[0][0];
+      expect(addItemCall.text).toContain('global qwen memory');
+      expect(addItemCall.text).toContain('global agents memory');
     });
   });
 
@@ -233,9 +409,7 @@ describe('memoryCommand', () => {
         services: {
           config: mockConfig,
           settings: {
-            merged: {
-              memoryDiscoveryMaxDirs: 1000,
-            },
+            merged: {},
           } as LoadedSettings,
         },
       });

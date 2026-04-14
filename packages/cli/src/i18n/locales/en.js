@@ -11,6 +11,12 @@ export default {
   // ============================================================================
   // Help / UI Components
   // ============================================================================
+  // Attachment hints
+  '↑ to manage attachments': '↑ to manage attachments',
+  '← → select, Delete to remove, ↓ to exit':
+    '← → select, Delete to remove, ↓ to exit',
+  'Attachments: ': 'Attachments: ',
+
   'Basics:': 'Basics:',
   'Add context': 'Add context',
   'Use {{symbol}} to specify files for context (e.g., {{example}}) to target specific files or folders.':
@@ -23,6 +29,7 @@ export default {
   'auto-accept edits': 'auto-accept edits',
   'Accepting edits': 'Accepting edits',
   '(shift + tab to cycle)': '(shift + tab to cycle)',
+  '(tab to cycle)': '(tab to cycle)',
   'Execute shell commands via {{symbol}} (e.g., {{example1}}) or use natural language (e.g., {{example2}}).':
     'Execute shell commands via {{symbol}} (e.g., {{example1}}) or use natural language (e.g., {{example2}}).',
   '!': '!',
@@ -33,6 +40,25 @@ export default {
   'Model Context Protocol command (from external servers)':
     'Model Context Protocol command (from external servers)',
   'Keyboard Shortcuts:': 'Keyboard Shortcuts:',
+  'Toggle this help display': 'Toggle this help display',
+  'Toggle shell mode': 'Toggle shell mode',
+  'Open command menu': 'Open command menu',
+  'Add file context': 'Add file context',
+  'Accept suggestion / Autocomplete': 'Accept suggestion / Autocomplete',
+  'Reverse search history': 'Reverse search history',
+  'Press ? again to close': 'Press ? again to close',
+  // Keyboard shortcuts panel descriptions
+  'for shell mode': 'for shell mode',
+  'for commands': 'for commands',
+  'for file paths': 'for file paths',
+  'to clear input': 'to clear input',
+  'to cycle approvals': 'to cycle approvals',
+  'to quit': 'to quit',
+  'for newline': 'for newline',
+  'to clear screen': 'to clear screen',
+  'to search history': 'to search history',
+  'to paste images': 'to paste images',
+  'for external editor': 'for external editor',
   'Jump through words in the input': 'Jump through words in the input',
   'Close dialogs, cancel requests, or quit application':
     'Close dialogs, cancel requests, or quit application',
@@ -46,6 +72,7 @@ export default {
   'Connecting to MCP servers... ({{connected}}/{{total}})':
     'Connecting to MCP servers... ({{connected}}/{{total}})',
   'Type your message or @path/to/file': 'Type your message or @path/to/file',
+  '? for shortcuts': '? for shortcuts',
   "Press 'i' for INSERT mode and 'Esc' for NORMAL mode.":
     "Press 'i' for INSERT mode and 'Esc' for NORMAL mode.",
   'Cancel operation / Clear input (double press)':
@@ -59,13 +86,19 @@ export default {
   'show version info': 'show version info',
   'submit a bug report': 'submit a bug report',
   'About Qwen Code': 'About Qwen Code',
+  Status: 'Status',
 
   // ============================================================================
   // System Information Fields
   // ============================================================================
+  'Qwen Code': 'Qwen Code',
+  Runtime: 'Runtime',
+  OS: 'OS',
+  Auth: 'Auth',
   'CLI Version': 'CLI Version',
   'Git Commit': 'Git Commit',
   Model: 'Model',
+  'Fast Model': 'Fast Model',
   Sandbox: 'Sandbox',
   'OS Platform': 'OS Platform',
   'OS Arch': 'OS Arch',
@@ -75,6 +108,7 @@ export default {
   'Session ID': 'Session ID',
   'Auth Method': 'Auth Method',
   'Base URL': 'Base URL',
+  Proxy: 'Proxy',
   'Memory Usage': 'Memory Usage',
   'IDE Client': 'IDE Client',
 
@@ -83,33 +117,39 @@ export default {
   // ============================================================================
   'Analyzes the project and creates a tailored QWEN.md file.':
     'Analyzes the project and creates a tailored QWEN.md file.',
-  'list available Qwen Code tools. Usage: /tools [desc]':
-    'list available Qwen Code tools. Usage: /tools [desc]',
+  'List available Qwen Code tools. Usage: /tools [desc]':
+    'List available Qwen Code tools. Usage: /tools [desc]',
+  'List available skills.': 'List available skills.',
   'Available Qwen Code CLI tools:': 'Available Qwen Code CLI tools:',
   'No tools available': 'No tools available',
   'View or change the approval mode for tool usage':
     'View or change the approval mode for tool usage',
+  'Invalid approval mode "{{arg}}". Valid modes: {{modes}}':
+    'Invalid approval mode "{{arg}}". Valid modes: {{modes}}',
+  'Approval mode set to "{{mode}}"': 'Approval mode set to "{{mode}}"',
   'View or change the language setting': 'View or change the language setting',
   'change the theme': 'change the theme',
   'Select Theme': 'Select Theme',
   Preview: 'Preview',
   '(Use Enter to select, Tab to configure scope)':
     '(Use Enter to select, Tab to configure scope)',
-  '(Use Enter to apply scope, Tab to select theme)':
-    '(Use Enter to apply scope, Tab to select theme)',
+  '(Use Enter to apply scope, Tab to go back)':
+    '(Use Enter to apply scope, Tab to go back)',
   'Theme configuration unavailable due to NO_COLOR env variable.':
     'Theme configuration unavailable due to NO_COLOR env variable.',
   'Theme "{{themeName}}" not found.': 'Theme "{{themeName}}" not found.',
   'Theme "{{themeName}}" not found in selected scope.':
     'Theme "{{themeName}}" not found in selected scope.',
-  'clear the screen and conversation history':
-    'clear the screen and conversation history',
+  'Clear conversation history and free up context':
+    'Clear conversation history and free up context',
   'Compresses the context by replacing it with a summary.':
     'Compresses the context by replacing it with a summary.',
   'open full Qwen Code documentation in your browser':
     'open full Qwen Code documentation in your browser',
   'Configuration not available.': 'Configuration not available.',
   'change the auth method': 'change the auth method',
+  'Configure authentication information for login':
+    'Configure authentication information for login',
   'Copy the last result or code snippet to clipboard':
     'Copy the last result or code snippet to clipboard',
 
@@ -140,6 +180,7 @@ export default {
   'Enter to confirm, Esc to cancel': 'Enter to confirm, Esc to cancel',
   'Enter to select, ↑↓ to navigate, Esc to go back':
     'Enter to select, ↑↓ to navigate, Esc to go back',
+  'Enter to submit, Esc to go back': 'Enter to submit, Esc to go back',
   'Invalid step: {{step}}': 'Invalid step: {{step}}',
   'No subagents found.': 'No subagents found.',
   "Use '/agents create' to create your first subagent.":
@@ -149,6 +190,7 @@ export default {
   'Project Level ({{path}})': 'Project Level ({{path}})',
   'User Level ({{path}})': 'User Level ({{path}})',
   'Built-in Agents': 'Built-in Agents',
+  'Extension Agents': 'Extension Agents',
   'Using: {{count}} agents': 'Using: {{count}} agents',
   'View Agent': 'View Agent',
   'Edit Agent': 'Edit Agent',
@@ -250,37 +292,113 @@ export default {
     'Failed to save and edit subagent: {{error}}',
 
   // ============================================================================
+  // Extensions - Management Dialog
+  // ============================================================================
+  'Manage Extensions': 'Manage Extensions',
+  'Extension Details': 'Extension Details',
+  'View Extension': 'View Extension',
+  'Update Extension': 'Update Extension',
+  'Disable Extension': 'Disable Extension',
+  'Enable Extension': 'Enable Extension',
+  'Uninstall Extension': 'Uninstall Extension',
+  'Select Scope': 'Select Scope',
+  'User Scope': 'User Scope',
+  'Workspace Scope': 'Workspace Scope',
+  'No extensions found.': 'No extensions found.',
+  Active: 'Active',
+  Disabled: 'Disabled',
+  'Update available': 'Update available',
+  'Up to date': 'Up to date',
+  'Checking...': 'Checking...',
+  'Updating...': 'Updating...',
+  Unknown: 'Unknown',
+  Error: 'Error',
+  'Version:': 'Version:',
+  'Status:': 'Status:',
+  'Are you sure you want to uninstall extension "{{name}}"?':
+    'Are you sure you want to uninstall extension "{{name}}"?',
+  'This action cannot be undone.': 'This action cannot be undone.',
+  'Extension "{{name}}" disabled successfully.':
+    'Extension "{{name}}" disabled successfully.',
+  'Extension "{{name}}" enabled successfully.':
+    'Extension "{{name}}" enabled successfully.',
+  'Extension "{{name}}" updated successfully.':
+    'Extension "{{name}}" updated successfully.',
+  'Failed to update extension "{{name}}": {{error}}':
+    'Failed to update extension "{{name}}": {{error}}',
+  'Select the scope for this action:': 'Select the scope for this action:',
+  'User - Applies to all projects': 'User - Applies to all projects',
+  'Workspace - Applies to current project only':
+    'Workspace - Applies to current project only',
+  // Extension dialog - missing keys
+  'Name:': 'Name:',
+  'MCP Servers:': 'MCP Servers:',
+  'Settings:': 'Settings:',
+  active: 'active',
+  disabled: 'disabled',
+  'View Details': 'View Details',
+  'Update failed:': 'Update failed:',
+  'Updating {{name}}...': 'Updating {{name}}...',
+  'Update complete!': 'Update complete!',
+  'User (global)': 'User (global)',
+  'Workspace (project-specific)': 'Workspace (project-specific)',
+  'Disable "{{name}}" - Select Scope': 'Disable "{{name}}" - Select Scope',
+  'Enable "{{name}}" - Select Scope': 'Enable "{{name}}" - Select Scope',
+  'No extension selected': 'No extension selected',
+  'Press Y/Enter to confirm, N/Esc to cancel':
+    'Press Y/Enter to confirm, N/Esc to cancel',
+  'Y/Enter to confirm, N/Esc to cancel': 'Y/Enter to confirm, N/Esc to cancel',
+  '{{count}} extensions installed': '{{count}} extensions installed',
+  "Use '/extensions install' to install your first extension.":
+    "Use '/extensions install' to install your first extension.",
+  // Update status values
+  'up to date': 'up to date',
+  'update available': 'update available',
+  'checking...': 'checking...',
+  'not updatable': 'not updatable',
+  error: 'error',
+
+  // ============================================================================
   // Commands - General (continued)
   // ============================================================================
   'View and edit Qwen Code settings': 'View and edit Qwen Code settings',
   Settings: 'Settings',
-  '(Use Enter to select{{tabText}})': '(Use Enter to select{{tabText}})',
-  ', Tab to change focus': ', Tab to change focus',
   'To see changes, Qwen Code must be restarted. Press r to exit and apply changes now.':
     'To see changes, Qwen Code must be restarted. Press r to exit and apply changes now.',
+  'The command "/{{command}}" is not supported in non-interactive mode.':
+    'The command "/{{command}}" is not supported in non-interactive mode.',
   // ============================================================================
   // Settings Labels
   // ============================================================================
   'Vim Mode': 'Vim Mode',
   'Disable Auto Update': 'Disable Auto Update',
+  'Attribution: commit': 'Attribution: commit',
+  'Terminal Bell Notification': 'Terminal Bell Notification',
+  'Enable Usage Statistics': 'Enable Usage Statistics',
+  Theme: 'Theme',
+  'Preferred Editor': 'Preferred Editor',
+  'Auto-connect to IDE': 'Auto-connect to IDE',
   'Enable Prompt Completion': 'Enable Prompt Completion',
   'Debug Keystroke Logging': 'Debug Keystroke Logging',
-  Language: 'Language',
+  'Language: UI': 'Language: UI',
+  'Language: Model': 'Language: Model',
   'Output Format': 'Output Format',
   'Hide Window Title': 'Hide Window Title',
   'Show Status in Title': 'Show Status in Title',
   'Hide Tips': 'Hide Tips',
-  'Hide Banner': 'Hide Banner',
-  'Hide Context Summary': 'Hide Context Summary',
-  'Hide CWD': 'Hide CWD',
-  'Hide Sandbox Status': 'Hide Sandbox Status',
-  'Hide Model Info': 'Hide Model Info',
-  'Hide Footer': 'Hide Footer',
-  'Show Memory Usage': 'Show Memory Usage',
-  'Show Line Numbers': 'Show Line Numbers',
+  'Show Line Numbers in Code': 'Show Line Numbers in Code',
   'Show Citations': 'Show Citations',
   'Custom Witty Phrases': 'Custom Witty Phrases',
-  'Enable Welcome Back': 'Enable Welcome Back',
+  'Show Welcome Back Dialog': 'Show Welcome Back Dialog',
+  'Enable User Feedback': 'Enable User Feedback',
+  'How is Qwen doing this session? (optional)':
+    'How is Qwen doing this session? (optional)',
+  Bad: 'Bad',
+  Fine: 'Fine',
+  Good: 'Good',
+  Dismiss: 'Dismiss',
+  'Not Sure Yet': 'Not Sure Yet',
+  'Any other key': 'Any other key',
   'Disable Loading Phrases': 'Disable Loading Phrases',
   'Screen Reader Mode': 'Screen Reader Mode',
   'IDE Mode': 'IDE Mode',
@@ -300,7 +418,7 @@ export default {
   'Respect .qwenignore': 'Respect .qwenignore',
   'Enable Recursive File Search': 'Enable Recursive File Search',
   'Disable Fuzzy Search': 'Disable Fuzzy Search',
-  'Enable Interactive Shell': 'Enable Interactive Shell',
+  'Interactive Shell (PTY)': 'Interactive Shell (PTY)',
   'Show Color': 'Show Color',
   'Auto Accept': 'Auto Accept',
   'Use Ripgrep': 'Use Ripgrep',
@@ -310,6 +428,7 @@ export default {
   'Tool Output Truncation Lines': 'Tool Output Truncation Lines',
   'Folder Trust': 'Folder Trust',
   'Vision Model Preview': 'Vision Model Preview',
+  'Tool Schema Compliance': 'Tool Schema Compliance',
   // Settings enum options
   'Auto (detect from system)': 'Auto (detect from system)',
   Text: 'Text',
@@ -326,18 +445,185 @@ export default {
   'Show tool-specific usage statistics.':
     'Show tool-specific usage statistics.',
   'exit the cli': 'exit the cli',
-  'list configured MCP servers and tools, or authenticate with OAuth-enabled servers':
-    'list configured MCP servers and tools, or authenticate with OAuth-enabled servers',
+  'Open MCP management dialog, or authenticate with OAuth-enabled servers':
+    'Open MCP management dialog, or authenticate with OAuth-enabled servers',
+  'List configured MCP servers and tools, or authenticate with OAuth-enabled servers':
+    'List configured MCP servers and tools, or authenticate with OAuth-enabled servers',
   'Manage workspace directories': 'Manage workspace directories',
   'Add directories to the workspace. Use comma to separate multiple paths':
     'Add directories to the workspace. Use comma to separate multiple paths',
   'Show all directories in the workspace':
     'Show all directories in the workspace',
   'set external editor preference': 'set external editor preference',
+  'Select Editor': 'Select Editor',
+  'Editor Preference': 'Editor Preference',
+  'These editors are currently supported. Please note that some editors cannot be used in sandbox mode.':
+    'These editors are currently supported. Please note that some editors cannot be used in sandbox mode.',
+  'Your preferred editor is:': 'Your preferred editor is:',
   'Manage extensions': 'Manage extensions',
+  'Manage installed extensions': 'Manage installed extensions',
   'List active extensions': 'List active extensions',
   'Update extensions. Usage: update <extension-names>|--all':
     'Update extensions. Usage: update <extension-names>|--all',
+  'Disable an extension': 'Disable an extension',
+  'Enable an extension': 'Enable an extension',
+  'Install an extension from a git repo or local path':
+    'Install an extension from a git repo or local path',
+  'Uninstall an extension': 'Uninstall an extension',
+  'No extensions installed.': 'No extensions installed.',
+  'Usage: /extensions update <extension-names>|--all':
+    'Usage: /extensions update <extension-names>|--all',
+  'Extension "{{name}}" not found.': 'Extension "{{name}}" not found.',
+  'No extensions to update.': 'No extensions to update.',
+  'Usage: /extensions install <source>': 'Usage: /extensions install <source>',
+  'Installing extension from "{{source}}"...':
+    'Installing extension from "{{source}}"...',
+  'Extension "{{name}}" installed successfully.':
+    'Extension "{{name}}" installed successfully.',
+  'Failed to install extension from "{{source}}": {{error}}':
+    'Failed to install extension from "{{source}}": {{error}}',
+  'Usage: /extensions uninstall <extension-name>':
+    'Usage: /extensions uninstall <extension-name>',
+  'Uninstalling extension "{{name}}"...':
+    'Uninstalling extension "{{name}}"...',
+  'Extension "{{name}}" uninstalled successfully.':
+    'Extension "{{name}}" uninstalled successfully.',
+  'Failed to uninstall extension "{{name}}": {{error}}':
+    'Failed to uninstall extension "{{name}}": {{error}}',
+  'Usage: /extensions {{command}} <extension> [--scope=<user|workspace>]':
+    'Usage: /extensions {{command}} <extension> [--scope=<user|workspace>]',
+  'Unsupported scope "{{scope}}", should be one of "user" or "workspace"':
+    'Unsupported scope "{{scope}}", should be one of "user" or "workspace"',
+  'Extension "{{name}}" disabled for scope "{{scope}}"':
+    'Extension "{{name}}" disabled for scope "{{scope}}"',
+  'Extension "{{name}}" enabled for scope "{{scope}}"':
+    'Extension "{{name}}" enabled for scope "{{scope}}"',
+  'Do you want to continue? [Y/n]: ': 'Do you want to continue? [Y/n]: ',
+  'Do you want to continue?': 'Do you want to continue?',
+  'Installing extension "{{name}}".': 'Installing extension "{{name}}".',
+  '**Extensions may introduce unexpected behavior. Ensure you have investigated the extension source and trust the author.**':
+    '**Extensions may introduce unexpected behavior. Ensure you have investigated the extension source and trust the author.**',
+  'This extension will run the following MCP servers:':
+    'This extension will run the following MCP servers:',
+  local: 'local',
+  remote: 'remote',
+  'This extension will add the following commands: {{commands}}.':
+    'This extension will add the following commands: {{commands}}.',
+  'This extension will append info to your QWEN.md context using {{fileName}}':
+    'This extension will append info to your QWEN.md context using {{fileName}}',
+  'This extension will exclude the following core tools: {{tools}}':
+    'This extension will exclude the following core tools: {{tools}}',
+  'This extension will install the following skills:':
+    'This extension will install the following skills:',
+  'This extension will install the following subagents:':
+    'This extension will install the following subagents:',
+  'Installation cancelled for "{{name}}".':
+    'Installation cancelled for "{{name}}".',
+  'You are installing an extension from {{originSource}}. Some features may not work perfectly with Qwen Code.':
+    'You are installing an extension from {{originSource}}. Some features may not work perfectly with Qwen Code.',
+  '--ref and --auto-update are not applicable for marketplace extensions.':
+    '--ref and --auto-update are not applicable for marketplace extensions.',
+  'Extension "{{name}}" installed successfully and enabled.':
+    'Extension "{{name}}" installed successfully and enabled.',
+  'Installs an extension from a git repository URL, local path, or claude marketplace (marketplace-url:plugin-name).':
+    'Installs an extension from a git repository URL, local path, or claude marketplace (marketplace-url:plugin-name).',
+  'The github URL, local path, or marketplace source (marketplace-url:plugin-name) of the extension to install.':
+    'The github URL, local path, or marketplace source (marketplace-url:plugin-name) of the extension to install.',
+  'The git ref to install from.': 'The git ref to install from.',
+  'Enable auto-update for this extension.':
+    'Enable auto-update for this extension.',
+  'Enable pre-release versions for this extension.':
+    'Enable pre-release versions for this extension.',
+  'Acknowledge the security risks of installing an extension and skip the confirmation prompt.':
+    'Acknowledge the security risks of installing an extension and skip the confirmation prompt.',
+  'The source argument must be provided.':
+    'The source argument must be provided.',
+  'Extension "{{name}}" successfully uninstalled.':
+    'Extension "{{name}}" successfully uninstalled.',
+  'Uninstalls an extension.': 'Uninstalls an extension.',
+  'The name or source path of the extension to uninstall.':
+    'The name or source path of the extension to uninstall.',
+  'Please include the name of the extension to uninstall as a positional argument.':
+    'Please include the name of the extension to uninstall as a positional argument.',
+  'Enables an extension.': 'Enables an extension.',
+  'The name of the extension to enable.':
+    'The name of the extension to enable.',
+  'The scope to enable the extenison in. If not set, will be enabled in all scopes.':
+    'The scope to enable the extenison in. If not set, will be enabled in all scopes.',
+  'Extension "{{name}}" successfully enabled for scope "{{scope}}".':
+    'Extension "{{name}}" successfully enabled for scope "{{scope}}".',
+  'Extension "{{name}}" successfully enabled in all scopes.':
+    'Extension "{{name}}" successfully enabled in all scopes.',
+  'Invalid scope: {{scope}}. Please use one of {{scopes}}.':
+    'Invalid scope: {{scope}}. Please use one of {{scopes}}.',
+  'Disables an extension.': 'Disables an extension.',
+  'The name of the extension to disable.':
+    'The name of the extension to disable.',
+  'The scope to disable the extenison in.':
+    'The scope to disable the extenison in.',
+  'Extension "{{name}}" successfully disabled for scope "{{scope}}".':
+    'Extension "{{name}}" successfully disabled for scope "{{scope}}".',
+  'Extension "{{name}}" successfully updated: {{oldVersion}} → {{newVersion}}.':
+    'Extension "{{name}}" successfully updated: {{oldVersion}} → {{newVersion}}.',
+  'Unable to install extension "{{name}}" due to missing install metadata':
+    'Unable to install extension "{{name}}" due to missing install metadata',
+  'Extension "{{name}}" is already up to date.':
+    'Extension "{{name}}" is already up to date.',
+  'Updates all extensions or a named extension to the latest version.':
+    'Updates all extensions or a named extension to the latest version.',
+  'Update all extensions.': 'Update all extensions.',
+  'Either an extension name or --all must be provided':
+    'Either an extension name or --all must be provided',
+  'Lists installed extensions.': 'Lists installed extensions.',
+  'Path:': 'Path:',
+  'Source:': 'Source:',
+  'Type:': 'Type:',
+  'Ref:': 'Ref:',
+  'Release tag:': 'Release tag:',
+  'Enabled (User):': 'Enabled (User):',
+  'Enabled (Workspace):': 'Enabled (Workspace):',
+  'Context files:': 'Context files:',
+  'Skills:': 'Skills:',
+  'Agents:': 'Agents:',
+  'MCP servers:': 'MCP servers:',
+  'Link extension failed to install.': 'Link extension failed to install.',
+  'Extension "{{name}}" linked successfully and enabled.':
+    'Extension "{{name}}" linked successfully and enabled.',
+  'Links an extension from a local path. Updates made to the local path will always be reflected.':
+    'Links an extension from a local path. Updates made to the local path will always be reflected.',
+  'The name of the extension to link.': 'The name of the extension to link.',
+  'Set a specific setting for an extension.':
+    'Set a specific setting for an extension.',
+  'Name of the extension to configure.': 'Name of the extension to configure.',
+  'The setting to configure (name or env var).':
+    'The setting to configure (name or env var).',
+  'The scope to set the setting in.': 'The scope to set the setting in.',
+  'List all settings for an extension.': 'List all settings for an extension.',
+  'Name of the extension.': 'Name of the extension.',
+  'Extension "{{name}}" has no settings to configure.':
+    'Extension "{{name}}" has no settings to configure.',
+  'Settings for "{{name}}":': 'Settings for "{{name}}":',
+  '(workspace)': '(workspace)',
+  '(user)': '(user)',
+  '[not set]': '[not set]',
+  '[value stored in keychain]': '[value stored in keychain]',
+  'Value:': 'Value:',
+  'Manage extension settings.': 'Manage extension settings.',
+  'You need to specify a command (set or list).':
+    'You need to specify a command (set or list).',
+  // ============================================================================
+  // Plugin Choice / Marketplace
+  // ============================================================================
+  'No plugins available in this marketplace.':
+    'No plugins available in this marketplace.',
+  'Select a plugin to install from marketplace "{{name}}":':
+    'Select a plugin to install from marketplace "{{name}}":',
+  'Plugin selection cancelled.': 'Plugin selection cancelled.',
+  'Select a plugin from "{{name}}"': 'Select a plugin from "{{name}}"',
+  'Use ↑↓ or j/k to navigate, Enter to select, Escape to cancel':
+    'Use ↑↓ or j/k to navigate, Enter to select, Escape to cancel',
+  '{{count}} more above': '{{count}} more above',
+  '{{count}} more below': '{{count}} more below',
   'manage IDE integration': 'manage IDE integration',
   'check status of IDE integration': 'check status of IDE integration',
   'install required IDE companion for {{ideName}}':
@@ -376,6 +662,166 @@ export default {
     'Failed to configure {{terminalName}}.',
   'Your terminal is already configured for an optimal experience with multiline input (Shift+Enter and Ctrl+Enter).':
     'Your terminal is already configured for an optimal experience with multiline input (Shift+Enter and Ctrl+Enter).',
+  // ============================================================================
+  // Commands - Hooks
+  // ============================================================================
+  'Manage Qwen Code hooks': 'Manage Qwen Code hooks',
+  'List all configured hooks': 'List all configured hooks',
+  'Enable a disabled hook': 'Enable a disabled hook',
+  'Disable an active hook': 'Disable an active hook',
+  // Hooks - Dialog
+  Hooks: 'Hooks',
+  'Loading hooks...': 'Loading hooks...',
+  'Error loading hooks:': 'Error loading hooks:',
+  'Press Escape to close': 'Press Escape to close',
+  'Press Escape, Ctrl+C, or Ctrl+D to cancel':
+    'Press Escape, Ctrl+C, or Ctrl+D to cancel',
+  'Press Space, Enter, or Escape to dismiss':
+    'Press Space, Enter, or Escape to dismiss',
+  'No hook selected': 'No hook selected',
+  // Hooks - List Step
+  'No hook events found.': 'No hook events found.',
+  '{{count}} hook configured': '{{count}} hook configured',
+  '{{count}} hooks configured': '{{count}} hooks configured',
+  'This menu is read-only. To add or modify hooks, edit settings.json directly or ask Qwen Code.':
+    'This menu is read-only. To add or modify hooks, edit settings.json directly or ask Qwen Code.',
+  'Enter to select · Esc to cancel': 'Enter to select · Esc to cancel',
+  // Hooks - Detail Step
+  'Exit codes:': 'Exit codes:',
+  'Configured hooks:': 'Configured hooks:',
+  'No hooks configured for this event.': 'No hooks configured for this event.',
+  'To add hooks, edit settings.json directly or ask Qwen.':
+    'To add hooks, edit settings.json directly or ask Qwen.',
+  'Enter to select · Esc to go back': 'Enter to select · Esc to go back',
+  // Hooks - Config Detail Step
+  'Hook details': 'Hook details',
+  'Event:': 'Event:',
+  'Extension:': 'Extension:',
+  'Desc:': 'Desc:',
+  'No hook config selected': 'No hook config selected',
+  'To modify or remove this hook, edit settings.json directly or ask Qwen to help.':
+    'To modify or remove this hook, edit settings.json directly or ask Qwen to help.',
+  // Hooks - Disabled Step
+  'Hook Configuration - Disabled': 'Hook Configuration - Disabled',
+  'All hooks are currently disabled. You have {{count}} that are not running.':
+    'All hooks are currently disabled. You have {{count}} that are not running.',
+  '{{count}} configured hook': '{{count}} configured hook',
+  '{{count}} configured hooks': '{{count}} configured hooks',
+  'When hooks are disabled:': 'When hooks are disabled:',
+  'No hook commands will execute': 'No hook commands will execute',
+  'StatusLine will not be displayed': 'StatusLine will not be displayed',
+  'Tool operations will proceed without hook validation':
+    'Tool operations will proceed without hook validation',
+  'To re-enable hooks, remove "disableAllHooks" from settings.json or ask Qwen Code.':
+    'To re-enable hooks, remove "disableAllHooks" from settings.json or ask Qwen Code.',
+  // Hooks - Source
+  Project: 'Project',
+  User: 'User',
+  System: 'System',
+  Extension: 'Extension',
+  'Local Settings': 'Local Settings',
+  'User Settings': 'User Settings',
+  'System Settings': 'System Settings',
+  Extensions: 'Extensions',
+  // Hooks - Status
+  '✓ Enabled': '✓ Enabled',
+  '✗ Disabled': '✗ Disabled',
+  // Hooks - Event Descriptions (short)
+  'Before tool execution': 'Before tool execution',
+  'After tool execution': 'After tool execution',
+  'After tool execution fails': 'After tool execution fails',
+  'When notifications are sent': 'When notifications are sent',
+  'When the user submits a prompt': 'When the user submits a prompt',
+  'When a new session is started': 'When a new session is started',
+  'Right before Qwen Code concludes its response':
+    'Right before Qwen Code concludes its response',
+  'When a subagent (Agent tool call) is started':
+    'When a subagent (Agent tool call) is started',
+  'Right before a subagent concludes its response':
+    'Right before a subagent concludes its response',
+  'Before conversation compaction': 'Before conversation compaction',
+  'When a session is ending': 'When a session is ending',
+  'When a permission dialog is displayed':
+    'When a permission dialog is displayed',
+  // Hooks - Event Descriptions (detailed)
+  'Input to command is JSON of tool call arguments.':
+    'Input to command is JSON of tool call arguments.',
+  'Input to command is JSON with fields "inputs" (tool call arguments) and "response" (tool call response).':
+    'Input to command is JSON with fields "inputs" (tool call arguments) and "response" (tool call response).',
+  'Input to command is JSON with tool_name, tool_input, tool_use_id, error, error_type, is_interrupt, and is_timeout.':
+    'Input to command is JSON with tool_name, tool_input, tool_use_id, error, error_type, is_interrupt, and is_timeout.',
+  'Input to command is JSON with notification message and type.':
+    'Input to command is JSON with notification message and type.',
+  'Input to command is JSON with original user prompt text.':
+    'Input to command is JSON with original user prompt text.',
+  'Input to command is JSON with session start source.':
+    'Input to command is JSON with session start source.',
+  'Input to command is JSON with session end reason.':
+    'Input to command is JSON with session end reason.',
+  'Input to command is JSON with agent_id and agent_type.':
+    'Input to command is JSON with agent_id and agent_type.',
+  'Input to command is JSON with agent_id, agent_type, and agent_transcript_path.':
+    'Input to command is JSON with agent_id, agent_type, and agent_transcript_path.',
+  'Input to command is JSON with compaction details.':
+    'Input to command is JSON with compaction details.',
+  'Input to command is JSON with tool_name, tool_input, and tool_use_id. Output JSON with hookSpecificOutput containing decision to allow or deny.':
+    'Input to command is JSON with tool_name, tool_input, and tool_use_id. Output JSON with hookSpecificOutput containing decision to allow or deny.',
+  // Hooks - Exit Code Descriptions
+  'stdout/stderr not shown': 'stdout/stderr not shown',
+  'show stderr to model and continue conversation':
+    'show stderr to model and continue conversation',
+  'show stderr to user only': 'show stderr to user only',
+  'stdout shown in transcript mode (ctrl+o)':
+    'stdout shown in transcript mode (ctrl+o)',
+  'show stderr to model immediately': 'show stderr to model immediately',
+  'show stderr to user only but continue with tool call':
+    'show stderr to user only but continue with tool call',
+  'block processing, erase original prompt, and show stderr to user only':
+    'block processing, erase original prompt, and show stderr to user only',
+  'stdout shown to Qwen': 'stdout shown to Qwen',
+  'show stderr to user only (blocking errors ignored)':
+    'show stderr to user only (blocking errors ignored)',
+  'command completes successfully': 'command completes successfully',
+  'stdout shown to subagent': 'stdout shown to subagent',
+  'show stderr to subagent and continue having it run':
+    'show stderr to subagent and continue having it run',
+  'stdout appended as custom compact instructions':
+    'stdout appended as custom compact instructions',
+  'block compaction': 'block compaction',
+  'show stderr to user only but continue with compaction':
+    'show stderr to user only but continue with compaction',
+  'use hook decision if provided': 'use hook decision if provided',
+  // Hooks - Messages
+  'Config not loaded.': 'Config not loaded.',
+  'Hooks are not enabled. Enable hooks in settings to use this feature.':
+    'Hooks are not enabled. Enable hooks in settings to use this feature.',
+  'No hooks configured. Add hooks in your settings.json file.':
+    'No hooks configured. Add hooks in your settings.json file.',
+  'Configured Hooks ({{count}} total)': 'Configured Hooks ({{count}} total)',
+
+  // ============================================================================
+  // Commands - Session Export
+  // ============================================================================
+  'Export current session message history to a file':
+    'Export current session message history to a file',
+  'Export session to HTML format': 'Export session to HTML format',
+  'Export session to JSON format': 'Export session to JSON format',
+  'Export session to JSONL format (one message per line)':
+    'Export session to JSONL format (one message per line)',
+  'Export session to markdown format': 'Export session to markdown format',
+
+  // ============================================================================
+  // Commands - Insights
+  // ============================================================================
+  'generate personalized programming insights from your chat history':
+    'generate personalized programming insights from your chat history',
+
+  // ============================================================================
+  // Commands - Session History
+  // ============================================================================
+  'Resume a previous session': 'Resume a previous session',
+  'Restore a tool call. This will reset the conversation and file history to the state it was in when the tool call was suggested':
+    'Restore a tool call. This will reset the conversation and file history to the state it was in when the tool call was suggested',
   'Could not detect terminal type. Supported terminals: VS Code, Cursor, Windsurf, and Trae.':
     'Could not detect terminal type. Supported terminals: VS Code, Cursor, Windsurf, and Trae.',
   'Terminal "{{terminal}}" is not supported yet.':
@@ -384,8 +830,8 @@ export default {
   // ============================================================================
   // Commands - Language
   // ============================================================================
-  'Invalid language. Available: en-US, zh-CN':
-    'Invalid language. Available: en-US, zh-CN',
+  'Invalid language. Available: {{options}}':
+    'Invalid language. Available: {{options}}',
   'Language subcommands do not accept additional arguments.':
     'Language subcommands do not accept additional arguments.',
   'Current UI language: {{lang}}': 'Current UI language: {{lang}}',
@@ -394,12 +840,14 @@ export default {
   'LLM output language not set': 'LLM output language not set',
   'Set UI language': 'Set UI language',
   'Set LLM output language': 'Set LLM output language',
-  'Usage: /language ui [zh-CN|en-US]': 'Usage: /language ui [zh-CN|en-US]',
+  'Usage: /language ui [{{options}}]': 'Usage: /language ui [{{options}}]',
   'Usage: /language output <language>': 'Usage: /language output <language>',
   'Example: /language output 中文': 'Example: /language output 中文',
   'Example: /language output English': 'Example: /language output English',
   'Example: /language output 日本語': 'Example: /language output 日本語',
+  'Example: /language output Português': 'Example: /language output Português',
   'UI language changed to {{lang}}': 'UI language changed to {{lang}}',
+  'LLM output language set to {{lang}}': 'LLM output language set to {{lang}}',
   'LLM output language rule file generated at {{path}}':
     'LLM output language rule file generated at {{path}}',
   'Please restart the application for the changes to take effect.':
@@ -412,16 +860,12 @@ export default {
   'To request additional UI language packs, please open an issue on GitHub.':
     'To request additional UI language packs, please open an issue on GitHub.',
   'Available options:': 'Available options:',
-  '  - zh-CN: Simplified Chinese': '  - zh-CN: Simplified Chinese',
-  '  - en-US: English': '  - en-US: English',
-  'Set UI language to Simplified Chinese (zh-CN)':
-    'Set UI language to Simplified Chinese (zh-CN)',
-  'Set UI language to English (en-US)': 'Set UI language to English (en-US)',
+  'Set UI language to {{name}}': 'Set UI language to {{name}}',
 
   // ============================================================================
   // Commands - Approval Mode
   // ============================================================================
-  'Approval Mode': 'Approval Mode',
+  'Tool Approval Mode': 'Tool Approval Mode',
   'Current approval mode: {{mode}}': 'Current approval mode: {{mode}}',
   'Available approval modes:': 'Available approval modes:',
   'Approval mode changed to: {{mode}}': 'Approval mode changed to: {{mode}}',
@@ -460,10 +904,7 @@ export default {
   'Automatically approve all tools': 'Automatically approve all tools',
   'Workspace approval mode exists and takes priority. User-level change will have no effect.':
     'Workspace approval mode exists and takes priority. User-level change will have no effect.',
-  '(Use Enter to select, Tab to change focus)':
-    '(Use Enter to select, Tab to change focus)',
   'Apply To': 'Apply To',
-  'User Settings': 'User Settings',
   'Workspace Settings': 'Workspace Settings',
 
   // ============================================================================
@@ -516,7 +957,7 @@ export default {
   'List configured MCP servers and tools':
     'List configured MCP servers and tools',
   'Restarts MCP servers.': 'Restarts MCP servers.',
-  'Config not loaded.': 'Config not loaded.',
+  'Open MCP management dialog': 'Open MCP management dialog',
   'Could not retrieve tool registry.': 'Could not retrieve tool registry.',
   'No MCP servers configured with OAuth authentication.':
     'No MCP servers configured with OAuth authentication.',
@@ -531,6 +972,117 @@ export default {
     "Failed to authenticate with MCP server '{{name}}': {{error}}",
   "Re-discovering tools from '{{name}}'...":
     "Re-discovering tools from '{{name}}'...",
+  "Discovered {{count}} tool(s) from '{{name}}'.":
+    "Discovered {{count}} tool(s) from '{{name}}'.",
+  'Authentication complete. Returning to server details...':
+    'Authentication complete. Returning to server details...',
+  'Authentication successful.': 'Authentication successful.',
+  'If the browser does not open, copy and paste this URL into your browser:':
+    'If the browser does not open, copy and paste this URL into your browser:',
+  'Make sure to copy the COMPLETE URL - it may wrap across multiple lines.':
+    'Make sure to copy the COMPLETE URL - it may wrap across multiple lines.',
+
+  // ============================================================================
+  // MCP Management Dialog
+  // ============================================================================
+  'Manage MCP servers': 'Manage MCP servers',
+  'Server Detail': 'Server Detail',
+  'Disable Server': 'Disable Server',
+  Tools: 'Tools',
+  'Tool Detail': 'Tool Detail',
+  'MCP Management': 'MCP Management',
+  'Loading...': 'Loading...',
+  'Unknown step': 'Unknown step',
+  'Esc to back': 'Esc to back',
+  '↑↓ to navigate · Enter to select · Esc to close':
+    '↑↓ to navigate · Enter to select · Esc to close',
+  '↑↓ to navigate · Enter to select · Esc to back':
+    '↑↓ to navigate · Enter to select · Esc to back',
+  '↑↓ to navigate · Enter to confirm · Esc to back':
+    '↑↓ to navigate · Enter to confirm · Esc to back',
+  'User Settings (global)': 'User Settings (global)',
+  'Workspace Settings (project-specific)':
+    'Workspace Settings (project-specific)',
+  'Disable server:': 'Disable server:',
+  'Select where to add the server to the exclude list:':
+    'Select where to add the server to the exclude list:',
+  'Press Enter to confirm, Esc to cancel':
+    'Press Enter to confirm, Esc to cancel',
+  'View tools': 'View tools',
+  Reconnect: 'Reconnect',
+  Enable: 'Enable',
+  Disable: 'Disable',
+  Authenticate: 'Authenticate',
+  'Re-authenticate': 'Re-authenticate',
+  'Clear Authentication': 'Clear Authentication',
+  'Server:': 'Server:',
+  'Command:': 'Command:',
+  'Working Directory:': 'Working Directory:',
+  'Capabilities:': 'Capabilities:',
+  'No server selected': 'No server selected',
+  prompts: 'prompts',
+  '(disabled)': '(disabled)',
+  'Error:': 'Error:',
+  tool: 'tool',
+  tools: 'tools',
+  connected: 'connected',
+  connecting: 'connecting',
+  disconnected: 'disconnected',
+
+  // MCP Server List
+  'User MCPs': 'User MCPs',
+  'Project MCPs': 'Project MCPs',
+  'Extension MCPs': 'Extension MCPs',
+  server: 'server',
+  servers: 'servers',
+  'Add MCP servers to your settings to get started.':
+    'Add MCP servers to your settings to get started.',
+  'Run qwen --debug to see error logs': 'Run qwen --debug to see error logs',
+
+  // MCP OAuth Authentication
+  'OAuth Authentication': 'OAuth Authentication',
+  'Press Enter to start authentication, Esc to go back':
+    'Press Enter to start authentication, Esc to go back',
+  'Authenticating... Please complete the login in your browser.':
+    'Authenticating... Please complete the login in your browser.',
+  'Press Enter or Esc to go back': 'Press Enter or Esc to go back',
+
+  // MCP Tool List
+  'No tools available for this server.': 'No tools available for this server.',
+  destructive: 'destructive',
+  'read-only': 'read-only',
+  'open-world': 'open-world',
+  idempotent: 'idempotent',
+  'Tools for {{name}}': 'Tools for {{name}}',
+  'Tools for {{serverName}}': 'Tools for {{serverName}}',
+  '{{current}}/{{total}}': '{{current}}/{{total}}',
+
+  // MCP Tool Detail
+  required: 'required',
+  Type: 'Type',
+  Enum: 'Enum',
+  Parameters: 'Parameters',
+  'No tool selected': 'No tool selected',
+  Annotations: 'Annotations',
+  Title: 'Title',
+  'Read Only': 'Read Only',
+  Destructive: 'Destructive',
+  Idempotent: 'Idempotent',
+  'Open World': 'Open World',
+  Server: 'Server',
+
+  // Invalid tool related translations
+  '{{count}} invalid tools': '{{count}} invalid tools',
+  invalid: 'invalid',
+  'invalid: {{reason}}': 'invalid: {{reason}}',
+  'missing name': 'missing name',
+  'missing description': 'missing description',
+  '(unnamed)': '(unnamed)',
+  'Warning: This tool cannot be called by the LLM':
+    'Warning: This tool cannot be called by the LLM',
+  Reason: 'Reason',
+  'Tools must have both name and description to be used by the LLM.':
+    'Tools must have both name and description to be used by the LLM.',
 
   // ============================================================================
   // Commands - Chat
@@ -589,11 +1141,20 @@ export default {
   'No conversation found to summarize.': 'No conversation found to summarize.',
   'Failed to generate project context summary: {{error}}':
     'Failed to generate project context summary: {{error}}',
+  'Saved project summary to {{filePathForDisplay}}.':
+    'Saved project summary to {{filePathForDisplay}}.',
+  'Saving project summary...': 'Saving project summary...',
+  'Generating project summary...': 'Generating project summary...',
+  'Failed to generate summary - no text content received from LLM response':
+    'Failed to generate summary - no text content received from LLM response',
 
   // ============================================================================
   // Commands - Model
   // ============================================================================
-  'Switch the model for this session': 'Switch the model for this session',
+  'Switch the model for this session (--fast for suggestion model)':
+    'Switch the model for this session (--fast for suggestion model)',
+  'Set a lighter model for prompt suggestions and speculative execution':
+    'Set a lighter model for prompt suggestions and speculative execution',
   'Content generator configuration not available.':
     'Content generator configuration not available.',
   'Authentication type not available.': 'Authentication type not available.',
@@ -603,9 +1164,10 @@ export default {
   // ============================================================================
   // Commands - Clear
   // ============================================================================
-  'Clearing terminal and resetting chat.':
-    'Clearing terminal and resetting chat.',
-  'Clearing terminal.': 'Clearing terminal.',
+  'Starting a new session, resetting chat, and clearing terminal.':
+    'Starting a new session, resetting chat, and clearing terminal.',
+  'Starting a new session and clearing.':
+    'Starting a new session and clearing.',
 
   // ============================================================================
   // Commands - Compress
@@ -635,8 +1197,8 @@ export default {
   'The /directory add command is not supported in restrictive sandbox profiles. Please use --include-directories when starting the session instead.':
     'The /directory add command is not supported in restrictive sandbox profiles. Please use --include-directories when starting the session instead.',
   "Error adding '{{path}}': {{error}}": "Error adding '{{path}}': {{error}}",
-  'Successfully added GEMINI.md files from the following directories if there are:\n- {{directories}}':
-    'Successfully added GEMINI.md files from the following directories if there are:\n- {{directories}}',
+  'Successfully added QWEN.md files from the following directories if there are:\n- {{directories}}':
+    'Successfully added QWEN.md files from the following directories if there are:\n- {{directories}}',
   'Error refreshing memory: {{error}}': 'Error refreshing memory: {{error}}',
   'Successfully added directories:\n- {{directories}}':
     'Successfully added directories:\n- {{directories}}',
@@ -657,6 +1219,7 @@ export default {
   'Do you want to proceed?': 'Do you want to proceed?',
   'Yes, allow once': 'Yes, allow once',
   'Allow always': 'Allow always',
+  Yes: 'Yes',
   No: 'No',
   'No (esc)': 'No (esc)',
   'Yes, allow always for this session': 'Yes, allow always for this session',
@@ -669,6 +1232,14 @@ export default {
   'No, suggest changes (esc)': 'No, suggest changes (esc)',
   "Allow execution of: '{{command}}'?": "Allow execution of: '{{command}}'?",
   'Yes, allow always ...': 'Yes, allow always ...',
+  'Always allow in this project': 'Always allow in this project',
+  'Always allow {{action}} in this project':
+    'Always allow {{action}} in this project',
+  'Always allow for this user': 'Always allow for this user',
+  'Always allow {{action}} for this user':
+    'Always allow {{action}} for this user',
+  'Yes, restore previous mode ({{mode}})':
+    'Yes, restore previous mode ({{mode}})',
   'Yes, and auto-accept edits': 'Yes, and auto-accept edits',
   'Yes, and manually approve edits': 'Yes, and manually approve edits',
   'No, keep planning (esc)': 'No, keep planning (esc)',
@@ -719,16 +1290,25 @@ export default {
   // Dialogs - Auth
   // ============================================================================
   'Get started': 'Get started',
-  'How would you like to authenticate for this project?':
-    'How would you like to authenticate for this project?',
+  'Select Authentication Method': 'Select Authentication Method',
   'OpenAI API key is required to use OpenAI authentication.':
     'OpenAI API key is required to use OpenAI authentication.',
   'You must select an auth method to proceed. Press Ctrl+C again to exit.':
     'You must select an auth method to proceed. Press Ctrl+C again to exit.',
-  '(Use Enter to Set Auth)': '(Use Enter to Set Auth)',
-  'Terms of Services and Privacy Notice for Qwen Code':
-    'Terms of Services and Privacy Notice for Qwen Code',
+  'Terms of Services and Privacy Notice':
+    'Terms of Services and Privacy Notice',
   'Qwen OAuth': 'Qwen OAuth',
+  'Free \u00B7 100 requests/day \u00B7 Ending 2026-04-15':
+    'Free \u00B7 100 requests/day \u00B7 Ending 2026-04-15',
+  'Login with QwenChat account to use daily free quota.':
+    'Login with QwenChat account to use daily free quota.',
+  'Paid \u00B7 Up to 6,000 requests/5 hrs \u00B7 All Alibaba Cloud Coding Plan Models':
+    'Paid \u00B7 Up to 6,000 requests/5 hrs \u00B7 All Alibaba Cloud Coding Plan Models',
+  'Alibaba Cloud Coding Plan': 'Alibaba Cloud Coding Plan',
+  'Bring your own API key': 'Bring your own API key',
+  'API-KEY': 'API-KEY',
+  'Use coding plan credentials or your own api-keys/providers.':
+    'Use coding plan credentials or your own api-keys/providers.',
   OpenAI: 'OpenAI',
   'Failed to login. Message: {{message}}':
     'Failed to login. Message: {{message}}',
@@ -753,10 +1333,27 @@ export default {
     'Waiting for Qwen OAuth authentication...',
   'Note: Your existing API key in settings.json will not be cleared when using Qwen OAuth. You can switch back to OpenAI authentication later if needed.':
     'Note: Your existing API key in settings.json will not be cleared when using Qwen OAuth. You can switch back to OpenAI authentication later if needed.',
+  'Note: Your existing API key will not be cleared when using Qwen OAuth.':
+    'Note: Your existing API key will not be cleared when using Qwen OAuth.',
   'Authentication timed out. Please try again.':
     'Authentication timed out. Please try again.',
   'Waiting for auth... (Press ESC or CTRL+C to cancel)':
     'Waiting for auth... (Press ESC or CTRL+C to cancel)',
+  'Missing API key for OpenAI-compatible auth. Set settings.security.auth.apiKey, or set the {{envKeyHint}} environment variable.':
+    'Missing API key for OpenAI-compatible auth. Set settings.security.auth.apiKey, or set the {{envKeyHint}} environment variable.',
+  '{{envKeyHint}} environment variable not found.':
+    '{{envKeyHint}} environment variable not found.',
+  '{{envKeyHint}} environment variable not found. Please set it in your .env file or environment variables.':
+    '{{envKeyHint}} environment variable not found. Please set it in your .env file or environment variables.',
+  '{{envKeyHint}} environment variable not found (or set settings.security.auth.apiKey). Please set it in your .env file or environment variables.':
+    '{{envKeyHint}} environment variable not found (or set settings.security.auth.apiKey). Please set it in your .env file or environment variables.',
+  'Missing API key for OpenAI-compatible auth. Set the {{envKeyHint}} environment variable.':
+    'Missing API key for OpenAI-compatible auth. Set the {{envKeyHint}} environment variable.',
+  'Anthropic provider missing required baseUrl in modelProviders[].baseUrl.':
+    'Anthropic provider missing required baseUrl in modelProviders[].baseUrl.',
+  'ANTHROPIC_BASE_URL environment variable not found.':
+    'ANTHROPIC_BASE_URL environment variable not found.',
+  'Invalid auth method selected.': 'Invalid auth method selected.',
   'Failed to authenticate. Message: {{message}}':
     'Failed to authenticate. Message: {{message}}',
   'Authenticated successfully with {{authType}} credentials.':
@@ -778,8 +1375,28 @@ export default {
   // ============================================================================
   'Select Model': 'Select Model',
   '(Press Esc to close)': '(Press Esc to close)',
-  'The latest Qwen Coder model from Alibaba Cloud ModelStudio (version: qwen3-coder-plus-2025-09-23)':
-    'The latest Qwen Coder model from Alibaba Cloud ModelStudio (version: qwen3-coder-plus-2025-09-23)',
+  'Current (effective) configuration': 'Current (effective) configuration',
+  AuthType: 'AuthType',
+  'API Key': 'API Key',
+  unset: 'unset',
+  '(default)': '(default)',
+  '(set)': '(set)',
+  '(not set)': '(not set)',
+  Modality: 'Modality',
+  'Context Window': 'Context Window',
+  text: 'text',
+  'text-only': 'text-only',
+  image: 'image',
+  pdf: 'pdf',
+  audio: 'audio',
+  video: 'video',
+  'not set': 'not set',
+  none: 'none',
+  unknown: 'unknown',
+  "Failed to switch model to '{{modelId}}'.\n\n{{error}}":
+    "Failed to switch model to '{{modelId}}'.\n\n{{error}}",
+  'Qwen 3.6 Plus — efficient hybrid model with leading coding performance':
+    'Qwen 3.6 Plus — efficient hybrid model with leading coding performance',
   'The latest Qwen Vision model from Alibaba Cloud ModelStudio (version: qwen3-vl-plus-2025-09-23)':
     'The latest Qwen Vision model from Alibaba Cloud ModelStudio (version: qwen3-vl-plus-2025-09-23)',
 
@@ -787,6 +1404,73 @@ export default {
   // Dialogs - Permissions
   // ============================================================================
   'Manage folder trust settings': 'Manage folder trust settings',
+  'Manage permission rules': 'Manage permission rules',
+  Allow: 'Allow',
+  Ask: 'Ask',
+  Deny: 'Deny',
+  Workspace: 'Workspace',
+  "Qwen Code won't ask before using allowed tools.":
+    "Qwen Code won't ask before using allowed tools.",
+  'Qwen Code will ask before using these tools.':
+    'Qwen Code will ask before using these tools.',
+  'Qwen Code is not allowed to use denied tools.':
+    'Qwen Code is not allowed to use denied tools.',
+  'Manage trusted directories for this workspace.':
+    'Manage trusted directories for this workspace.',
+  'Any use of the {{tool}} tool': 'Any use of the {{tool}} tool',
+  "{{tool}} commands matching '{{pattern}}'":
+    "{{tool}} commands matching '{{pattern}}'",
+  'From user settings': 'From user settings',
+  'From project settings': 'From project settings',
+  'From session': 'From session',
+  'Project settings (local)': 'Project settings (local)',
+  'Saved in .qwen/settings.local.json': 'Saved in .qwen/settings.local.json',
+  'Project settings': 'Project settings',
+  'Checked in at .qwen/settings.json': 'Checked in at .qwen/settings.json',
+  'User settings': 'User settings',
+  'Saved in at ~/.qwen/settings.json': 'Saved in at ~/.qwen/settings.json',
+  'Add a new rule…': 'Add a new rule…',
+  'Add {{type}} permission rule': 'Add {{type}} permission rule',
+  'Permission rules are a tool name, optionally followed by a specifier in parentheses.':
+    'Permission rules are a tool name, optionally followed by a specifier in parentheses.',
+  'e.g.,': 'e.g.,',
+  or: 'or',
+  'Enter permission rule…': 'Enter permission rule…',
+  'Enter to submit · Esc to cancel': 'Enter to submit · Esc to cancel',
+  'Where should this rule be saved?': 'Where should this rule be saved?',
+  'Enter to confirm · Esc to cancel': 'Enter to confirm · Esc to cancel',
+  'Delete {{type}} rule?': 'Delete {{type}} rule?',
+  'Are you sure you want to delete this permission rule?':
+    'Are you sure you want to delete this permission rule?',
+  'Permissions:': 'Permissions:',
+  '(←/→ or tab to cycle)': '(←/→ or tab to cycle)',
+  'Press ↑↓ to navigate · Enter to select · Type to search · Esc to cancel':
+    'Press ↑↓ to navigate · Enter to select · Type to search · Esc to cancel',
+  'Search…': 'Search…',
+  'Use /trust to manage folder trust settings for this workspace.':
+    'Use /trust to manage folder trust settings for this workspace.',
+  // Workspace directory management
+  'Add directory…': 'Add directory…',
+  'Add directory to workspace': 'Add directory to workspace',
+  'Qwen Code can read files in the workspace, and make edits when auto-accept edits is on.':
+    'Qwen Code can read files in the workspace, and make edits when auto-accept edits is on.',
+  'Qwen Code will be able to read files in this directory and make edits when auto-accept edits is on.':
+    'Qwen Code will be able to read files in this directory and make edits when auto-accept edits is on.',
+  'Enter the path to the directory:': 'Enter the path to the directory:',
+  'Enter directory path…': 'Enter directory path…',
+  'Tab to complete · Enter to add · Esc to cancel':
+    'Tab to complete · Enter to add · Esc to cancel',
+  'Remove directory?': 'Remove directory?',
+  'Are you sure you want to remove this directory from the workspace?':
+    'Are you sure you want to remove this directory from the workspace?',
+  '  (Original working directory)': '  (Original working directory)',
+  '  (from settings)': '  (from settings)',
+  'Directory does not exist.': 'Directory does not exist.',
+  'Path is not a directory.': 'Path is not a directory.',
+  'This directory is already in the workspace.':
+    'This directory is already in the workspace.',
+  'Already covered by existing directory: {{dir}}':
+    'Already covered by existing directory: {{dir}}',
 
   // ============================================================================
   // Status Bar
@@ -805,14 +1489,12 @@ export default {
   'Press Ctrl+C again to exit.': 'Press Ctrl+C again to exit.',
   'Press Ctrl+D again to exit.': 'Press Ctrl+D again to exit.',
   'Press Esc again to clear.': 'Press Esc again to clear.',
+  'Press ↑ to edit queued messages': 'Press ↑ to edit queued messages',
 
   // ============================================================================
   // MCP Status
   // ============================================================================
   'No MCP servers configured.': 'No MCP servers configured.',
-  'Please view MCP documentation in your browser:':
-    'Please view MCP documentation in your browser:',
-  'or use the cli /docs command': 'or use the cli /docs command',
   '⏳ MCP servers are starting up ({{count}} initializing)...':
     '⏳ MCP servers are starting up ({{count}} initializing)...',
   'Note: First startup may take longer. Tool availability will update automatically.':
@@ -854,19 +1536,43 @@ export default {
   // ============================================================================
   // Startup Tips
   // ============================================================================
-  'Tips for getting started:': 'Tips for getting started:',
-  '1. Ask questions, edit files, or run commands.':
-    '1. Ask questions, edit files, or run commands.',
-  '2. Be specific for the best results.':
-    '2. Be specific for the best results.',
-  'files to customize your interactions with Qwen Code.':
-    'files to customize your interactions with Qwen Code.',
-  'for more information.': 'for more information.',
+  'Tips:': 'Tips:',
+  'Use /compress when the conversation gets long to summarize history and free up context.':
+    'Use /compress when the conversation gets long to summarize history and free up context.',
+  'Start a fresh idea with /clear or /new; the previous session stays available in history.':
+    'Start a fresh idea with /clear or /new; the previous session stays available in history.',
+  'Use /bug to submit issues to the maintainers when something goes off.':
+    'Use /bug to submit issues to the maintainers when something goes off.',
+  'Switch auth type quickly with /auth.':
+    'Switch auth type quickly with /auth.',
+  'You can run any shell commands from Qwen Code using ! (e.g. !ls).':
+    'You can run any shell commands from Qwen Code using ! (e.g. !ls).',
+  'Type / to open the command popup; Tab autocompletes slash commands and saved prompts.':
+    'Type / to open the command popup; Tab autocompletes slash commands and saved prompts.',
+  'You can resume a previous conversation by running qwen --continue or qwen --resume.':
+    'You can resume a previous conversation by running qwen --continue or qwen --resume.',
+  'You can switch permission mode quickly with Shift+Tab or /approval-mode.':
+    'You can switch permission mode quickly with Shift+Tab or /approval-mode.',
+  'You can switch permission mode quickly with Tab or /approval-mode.':
+    'You can switch permission mode quickly with Tab or /approval-mode.',
+  'Try /insight to generate personalized insights from your chat history.':
+    'Try /insight to generate personalized insights from your chat history.',
+  'Add a QWEN.md file to give Qwen Code persistent project context.':
+    'Add a QWEN.md file to give Qwen Code persistent project context.',
+  'Use /btw to ask a quick side question without disrupting the conversation.':
+    'Use /btw to ask a quick side question without disrupting the conversation.',
+  'Context is almost full! Run /compress now or start /new to continue.':
+    'Context is almost full! Run /compress now or start /new to continue.',
+  'Context is getting full. Use /compress to free up space.':
+    'Context is getting full. Use /compress to free up space.',
+  'Long conversation? /compress summarizes history to free context.':
+    'Long conversation? /compress summarizes history to free context.',
 
   // ============================================================================
   // Exit Screen / Stats
   // ============================================================================
   'Agent powering down. Goodbye!': 'Agent powering down. Goodbye!',
+  'To continue this session, run': 'To continue this session, run',
   'Interaction Summary': 'Interaction Summary',
   'Session ID:': 'Session ID:',
   'Tool Calls:': 'Tool Calls:',
@@ -921,196 +1627,419 @@ export default {
     'Session start time is unavailable, cannot calculate stats.',
 
   // ============================================================================
+  // Command Format Migration
+  // ============================================================================
+  'Command Format Migration': 'Command Format Migration',
+  'Found {{count}} TOML command file:': 'Found {{count}} TOML command file:',
+  'Found {{count}} TOML command files:': 'Found {{count}} TOML command files:',
+  '... and {{count}} more': '... and {{count}} more',
+  'The TOML format is deprecated. Would you like to migrate them to Markdown format?':
+    'The TOML format is deprecated. Would you like to migrate them to Markdown format?',
+  '(Backups will be created and original files will be preserved)':
+    '(Backups will be created and original files will be preserved)',
+
+  // ============================================================================
   // Loading Phrases
   // ============================================================================
   'Waiting for user confirmation...': 'Waiting for user confirmation...',
   '(esc to cancel, {{time}})': '(esc to cancel, {{time}})',
-  "I'm Feeling Lucky": "I'm Feeling Lucky",
-  'Shipping awesomeness... ': 'Shipping awesomeness... ',
-  'Painting the serifs back on...': 'Painting the serifs back on...',
-  'Navigating the slime mold...': 'Navigating the slime mold...',
-  'Consulting the digital spirits...': 'Consulting the digital spirits...',
-  'Reticulating splines...': 'Reticulating splines...',
-  'Warming up the AI hamsters...': 'Warming up the AI hamsters...',
-  'Asking the magic conch shell...': 'Asking the magic conch shell...',
-  'Generating witty retort...': 'Generating witty retort...',
-  'Polishing the algorithms...': 'Polishing the algorithms...',
-  "Don't rush perfection (or my code)...":
+
+  // ============================================================================
+  // Loading Phrases
+  // ============================================================================
+  WITTY_LOADING_PHRASES: [
+    "I'm Feeling Lucky",
+    'Shipping awesomeness... ',
+    'Painting the serifs back on...',
+    'Navigating the slime mold...',
+    'Consulting the digital spirits...',
+    'Reticulating splines...',
+    'Warming up the AI hamsters...',
+    'Asking the magic conch shell...',
+    'Generating witty retort...',
+    'Polishing the algorithms...',
     "Don't rush perfection (or my code)...",
-  'Brewing fresh bytes...': 'Brewing fresh bytes...',
-  'Counting electrons...': 'Counting electrons...',
-  'Engaging cognitive processors...': 'Engaging cognitive processors...',
-  'Checking for syntax errors in the universe...':
+    'Brewing fresh bytes...',
+    'Counting electrons...',
+    'Engaging cognitive processors...',
     'Checking for syntax errors in the universe...',
-  'One moment, optimizing humor...': 'One moment, optimizing humor...',
-  'Shuffling punchlines...': 'Shuffling punchlines...',
-  'Untangling neural nets...': 'Untangling neural nets...',
-  'Compiling brilliance...': 'Compiling brilliance...',
-  'Loading wit.exe...': 'Loading wit.exe...',
-  'Summoning the cloud of wisdom...': 'Summoning the cloud of wisdom...',
-  'Preparing a witty response...': 'Preparing a witty response...',
-  "Just a sec, I'm debugging reality...":
+    'One moment, optimizing humor...',
+    'Shuffling punchlines...',
+    'Untangling neural nets...',
+    'Compiling brilliance...',
+    'Loading wit.exe...',
+    'Summoning the cloud of wisdom...',
+    'Preparing a witty response...',
     "Just a sec, I'm debugging reality...",
-  'Confuzzling the options...': 'Confuzzling the options...',
-  'Tuning the cosmic frequencies...': 'Tuning the cosmic frequencies...',
-  'Crafting a response worthy of your patience...':
+    'Confuzzling the options...',
+    'Tuning the cosmic frequencies...',
     'Crafting a response worthy of your patience...',
-  'Compiling the 1s and 0s...': 'Compiling the 1s and 0s...',
-  'Resolving dependencies... and existential crises...':
+    'Compiling the 1s and 0s...',
     'Resolving dependencies... and existential crises...',
-  'Defragmenting memories... both RAM and personal...':
     'Defragmenting memories... both RAM and personal...',
-  'Rebooting the humor module...': 'Rebooting the humor module...',
-  'Caching the essentials (mostly cat memes)...':
+    'Rebooting the humor module...',
     'Caching the essentials (mostly cat memes)...',
-  'Optimizing for ludicrous speed': 'Optimizing for ludicrous speed',
-  "Swapping bits... don't tell the bytes...":
+    'Optimizing for ludicrous speed',
     "Swapping bits... don't tell the bytes...",
-  'Garbage collecting... be right back...':
     'Garbage collecting... be right back...',
-  'Assembling the interwebs...': 'Assembling the interwebs...',
-  'Converting coffee into code...': 'Converting coffee into code...',
-  'Updating the syntax for reality...': 'Updating the syntax for reality...',
-  'Rewiring the synapses...': 'Rewiring the synapses...',
-  'Looking for a misplaced semicolon...':
+    'Assembling the interwebs...',
+    'Converting coffee into code...',
+    'Updating the syntax for reality...',
+    'Rewiring the synapses...',
     'Looking for a misplaced semicolon...',
-  "Greasin' the cogs of the machine...": "Greasin' the cogs of the machine...",
-  'Pre-heating the servers...': 'Pre-heating the servers...',
-  'Calibrating the flux capacitor...': 'Calibrating the flux capacitor...',
-  'Engaging the improbability drive...': 'Engaging the improbability drive...',
-  'Channeling the Force...': 'Channeling the Force...',
-  'Aligning the stars for optimal response...':
+    "Greasin' the cogs of the machine...",
+    'Pre-heating the servers...',
+    'Calibrating the flux capacitor...',
+    'Engaging the improbability drive...',
+    'Channeling the Force...',
     'Aligning the stars for optimal response...',
-  'So say we all...': 'So say we all...',
-  'Loading the next great idea...': 'Loading the next great idea...',
-  "Just a moment, I'm in the zone...": "Just a moment, I'm in the zone...",
-  'Preparing to dazzle you with brilliance...':
+    'So say we all...',
+    'Loading the next great idea...',
+    "Just a moment, I'm in the zone...",
     'Preparing to dazzle you with brilliance...',
-  "Just a tick, I'm polishing my wit...":
     "Just a tick, I'm polishing my wit...",
-  "Hold tight, I'm crafting a masterpiece...":
     "Hold tight, I'm crafting a masterpiece...",
-  "Just a jiffy, I'm debugging the universe...":
     "Just a jiffy, I'm debugging the universe...",
-  "Just a moment, I'm aligning the pixels...":
     "Just a moment, I'm aligning the pixels...",
-  "Just a sec, I'm optimizing the humor...":
     "Just a sec, I'm optimizing the humor...",
-  "Just a moment, I'm tuning the algorithms...":
     "Just a moment, I'm tuning the algorithms...",
-  'Warp speed engaged...': 'Warp speed engaged...',
-  'Mining for more Dilithium crystals...':
+    'Warp speed engaged...',
     'Mining for more Dilithium crystals...',
-  "Don't panic...": "Don't panic...",
-  'Following the white rabbit...': 'Following the white rabbit...',
-  'The truth is in here... somewhere...':
+    "Don't panic...",
+    'Following the white rabbit...',
     'The truth is in here... somewhere...',
-  'Blowing on the cartridge...': 'Blowing on the cartridge...',
-  'Loading... Do a barrel roll!': 'Loading... Do a barrel roll!',
-  'Waiting for the respawn...': 'Waiting for the respawn...',
-  'Finishing the Kessel Run in less than 12 parsecs...':
+    'Blowing on the cartridge...',
+    'Loading... Do a barrel roll!',
+    'Waiting for the respawn...',
     'Finishing the Kessel Run in less than 12 parsecs...',
-  "The cake is not a lie, it's just still loading...":
     "The cake is not a lie, it's just still loading...",
-  'Fiddling with the character creation screen...':
     'Fiddling with the character creation screen...',
-  "Just a moment, I'm finding the right meme...":
     "Just a moment, I'm finding the right meme...",
-  "Pressing 'A' to continue...": "Pressing 'A' to continue...",
-  'Herding digital cats...': 'Herding digital cats...',
-  'Polishing the pixels...': 'Polishing the pixels...',
-  'Finding a suitable loading screen pun...':
+    "Pressing 'A' to continue...",
+    'Herding digital cats...',
+    'Polishing the pixels...',
     'Finding a suitable loading screen pun...',
-  'Distracting you with this witty phrase...':
     'Distracting you with this witty phrase...',
-  'Almost there... probably...': 'Almost there... probably...',
-  'Our hamsters are working as fast as they can...':
+    'Almost there... probably...',
     'Our hamsters are working as fast as they can...',
-  'Giving Cloudy a pat on the head...': 'Giving Cloudy a pat on the head...',
-  'Petting the cat...': 'Petting the cat...',
-  'Rickrolling my boss...': 'Rickrolling my boss...',
-  'Never gonna give you up, never gonna let you down...':
+    'Giving Cloudy a pat on the head...',
+    'Petting the cat...',
+    'Rickrolling my boss...',
     'Never gonna give you up, never gonna let you down...',
-  'Slapping the bass...': 'Slapping the bass...',
-  'Tasting the snozberries...': 'Tasting the snozberries...',
-  "I'm going the distance, I'm going for speed...":
+    'Slapping the bass...',
+    'Tasting the snozberries...',
     "I'm going the distance, I'm going for speed...",
-  'Is this the real life? Is this just fantasy?...':
     'Is this the real life? Is this just fantasy?...',
-  "I've got a good feeling about this...":
     "I've got a good feeling about this...",
-  'Poking the bear...': 'Poking the bear...',
-  'Doing research on the latest memes...':
+    'Poking the bear...',
     'Doing research on the latest memes...',
-  'Figuring out how to make this more witty...':
     'Figuring out how to make this more witty...',
-  'Hmmm... let me think...': 'Hmmm... let me think...',
-  'What do you call a fish with no eyes? A fsh...':
+    'Hmmm... let me think...',
     'What do you call a fish with no eyes? A fsh...',
-  'Why did the computer go to therapy? It had too many bytes...':
     'Why did the computer go to therapy? It had too many bytes...',
-  "Why don't programmers like nature? It has too many bugs...":
     "Why don't programmers like nature? It has too many bugs...",
-  'Why do programmers prefer dark mode? Because light attracts bugs...':
     'Why do programmers prefer dark mode? Because light attracts bugs...',
-  'Why did the developer go broke? Because they used up all their cache...':
     'Why did the developer go broke? Because they used up all their cache...',
-  "What can you do with a broken pencil? Nothing, it's pointless...":
     "What can you do with a broken pencil? Nothing, it's pointless...",
-  'Applying percussive maintenance...': 'Applying percussive maintenance...',
-  'Searching for the correct USB orientation...':
+    'Applying percussive maintenance...',
     'Searching for the correct USB orientation...',
-  'Ensuring the magic smoke stays inside the wires...':
     'Ensuring the magic smoke stays inside the wires...',
-  'Rewriting in Rust for no particular reason...':
-    'Rewriting in Rust for no particular reason...',
-  'Trying to exit Vim...': 'Trying to exit Vim...',
-  'Spinning up the hamster wheel...': 'Spinning up the hamster wheel...',
-  "That's not a bug, it's an undocumented feature...":
+    'Trying to exit Vim...',
+    'Spinning up the hamster wheel...',
     "That's not a bug, it's an undocumented feature...",
-  'Engage.': 'Engage.',
-  "I'll be back... with an answer.": "I'll be back... with an answer.",
-  'My other process is a TARDIS...': 'My other process is a TARDIS...',
-  'Communing with the machine spirit...':
+    'Engage.',
+    "I'll be back... with an answer.",
+    'My other process is a TARDIS...',
     'Communing with the machine spirit...',
-  'Letting the thoughts marinate...': 'Letting the thoughts marinate...',
-  'Just remembered where I put my keys...':
+    'Letting the thoughts marinate...',
     'Just remembered where I put my keys...',
-  'Pondering the orb...': 'Pondering the orb...',
-  "I've seen things you people wouldn't believe... like a user who reads loading messages.":
+    'Pondering the orb...',
     "I've seen things you people wouldn't believe... like a user who reads loading messages.",
-  'Initiating thoughtful gaze...': 'Initiating thoughtful gaze...',
-  "What's a computer's favorite snack? Microchips.":
+    'Initiating thoughtful gaze...',
     "What's a computer's favorite snack? Microchips.",
-  "Why do Java developers wear glasses? Because they don't C#.":
     "Why do Java developers wear glasses? Because they don't C#.",
-  'Charging the laser... pew pew!': 'Charging the laser... pew pew!',
-  'Dividing by zero... just kidding!': 'Dividing by zero... just kidding!',
-  'Looking for an adult superviso... I mean, processing.':
+    'Charging the laser... pew pew!',
+    'Dividing by zero... just kidding!',
     'Looking for an adult superviso... I mean, processing.',
-  'Making it go beep boop.': 'Making it go beep boop.',
-  'Buffering... because even AIs need a moment.':
+    'Making it go beep boop.',
     'Buffering... because even AIs need a moment.',
-  'Entangling quantum particles for a faster response...':
     'Entangling quantum particles for a faster response...',
-  'Polishing the chrome... on the algorithms.':
     'Polishing the chrome... on the algorithms.',
-  'Are you not entertained? (Working on it!)':
     'Are you not entertained? (Working on it!)',
-  'Summoning the code gremlins... to help, of course.':
     'Summoning the code gremlins... to help, of course.',
-  'Just waiting for the dial-up tone to finish...':
     'Just waiting for the dial-up tone to finish...',
-  'Recalibrating the humor-o-meter.': 'Recalibrating the humor-o-meter.',
-  'My other loading screen is even funnier.':
+    'Recalibrating the humor-o-meter.',
     'My other loading screen is even funnier.',
-  "Pretty sure there's a cat walking on the keyboard somewhere...":
     "Pretty sure there's a cat walking on the keyboard somewhere...",
-  'Enhancing... Enhancing... Still loading.':
     'Enhancing... Enhancing... Still loading.',
-  "It's not a bug, it's a feature... of this loading screen.":
     "It's not a bug, it's a feature... of this loading screen.",
-  'Have you tried turning it off and on again? (The loading screen, not me.)':
     'Have you tried turning it off and on again? (The loading screen, not me.)',
-  'Constructing additional pylons...': 'Constructing additional pylons...',
+    'Constructing additional pylons...',
+  ],
+
+  // ============================================================================
+  // Extension Settings Input
+  // ============================================================================
+  'Enter value...': 'Enter value...',
+  'Enter sensitive value...': 'Enter sensitive value...',
+  'Press Enter to submit, Escape to cancel':
+    'Press Enter to submit, Escape to cancel',
+
+  // ============================================================================
+  // Command Migration Tool
+  // ============================================================================
+  'Markdown file already exists: {{filename}}':
+    'Markdown file already exists: {{filename}}',
+  'TOML Command Format Deprecation Notice':
+    'TOML Command Format Deprecation Notice',
+  'Found {{count}} command file(s) in TOML format:':
+    'Found {{count}} command file(s) in TOML format:',
+  'The TOML format for commands is being deprecated in favor of Markdown format.':
+    'The TOML format for commands is being deprecated in favor of Markdown format.',
+  'Markdown format is more readable and easier to edit.':
+    'Markdown format is more readable and easier to edit.',
+  'You can migrate these files automatically using:':
+    'You can migrate these files automatically using:',
+  'Or manually convert each file:': 'Or manually convert each file:',
+  'TOML: prompt = "..." / description = "..."':
+    'TOML: prompt = "..." / description = "..."',
+  'Markdown: YAML frontmatter + content':
+    'Markdown: YAML frontmatter + content',
+  'The migration tool will:': 'The migration tool will:',
+  'Convert TOML files to Markdown': 'Convert TOML files to Markdown',
+  'Create backups of original files': 'Create backups of original files',
+  'Preserve all command functionality': 'Preserve all command functionality',
+  'TOML format will continue to work for now, but migration is recommended.':
+    'TOML format will continue to work for now, but migration is recommended.',
+
+  // ============================================================================
+  // Extensions - Explore Command
+  // ============================================================================
+  'Open extensions page in your browser':
+    'Open extensions page in your browser',
+  'Unknown extensions source: {{source}}.':
+    'Unknown extensions source: {{source}}.',
+  'Would open extensions page in your browser: {{url}} (skipped in test environment)':
+    'Would open extensions page in your browser: {{url}} (skipped in test environment)',
+  'View available extensions at {{url}}':
+    'View available extensions at {{url}}',
+  'Opening extensions page in your browser: {{url}}':
+    'Opening extensions page in your browser: {{url}}',
+  'Failed to open browser. Check out the extensions gallery at {{url}}':
+    'Failed to open browser. Check out the extensions gallery at {{url}}',
+
+  // ============================================================================
+  // Retry / Rate Limit
+  // ============================================================================
+  'Rate limit error: {{reason}}': 'Rate limit error: {{reason}}',
+  'Retrying in {{seconds}} seconds… (attempt {{attempt}}/{{maxRetries}})':
+    'Retrying in {{seconds}} seconds… (attempt {{attempt}}/{{maxRetries}})',
+  'Press Ctrl+Y to retry': 'Press Ctrl+Y to retry',
+  'No failed request to retry.': 'No failed request to retry.',
+  'to retry last request': 'to retry last request',
+
+  // ============================================================================
+  // Coding Plan Authentication
+  // ============================================================================
+  'API key cannot be empty.': 'API key cannot be empty.',
+  'You can get your Coding Plan API key here':
+    'You can get your Coding Plan API key here',
+  'API key is stored in settings.env. You can migrate it to a .env file for better security.':
+    'API key is stored in settings.env. You can migrate it to a .env file for better security.',
+  'New model configurations are available for Alibaba Cloud Coding Plan. Update now?':
+    'New model configurations are available for Alibaba Cloud Coding Plan. Update now?',
+  'Coding Plan configuration updated successfully. New models are now available.':
+    'Coding Plan configuration updated successfully. New models are now available.',
+  'Coding Plan API key not found. Please re-authenticate with Coding Plan.':
+    'Coding Plan API key not found. Please re-authenticate with Coding Plan.',
+  'Failed to update Coding Plan configuration: {{message}}':
+    'Failed to update Coding Plan configuration: {{message}}',
+
+  // ============================================================================
+  // Custom API Key Configuration
+  // ============================================================================
+  'You can configure your API key and models in settings.json':
+    'You can configure your API key and models in settings.json',
+  'Refer to the documentation for setup instructions':
+    'Refer to the documentation for setup instructions',
+
+  // ============================================================================
+  // Auth Dialog - View Titles and Labels
+  // ============================================================================
+  'Coding Plan': 'Coding Plan',
+  "Paste your api key of ModelStudio Coding Plan and you're all set!":
+    "Paste your api key of ModelStudio Coding Plan and you're all set!",
+  Custom: 'Custom',
+  'More instructions about configuring `modelProviders` manually.':
+    'More instructions about configuring `modelProviders` manually.',
+  'Select API-KEY configuration mode:': 'Select API-KEY configuration mode:',
+  '(Press Escape to go back)': '(Press Escape to go back)',
+  '(Press Enter to submit, Escape to cancel)':
+    '(Press Enter to submit, Escape to cancel)',
+  'Select Region for Coding Plan': 'Select Region for Coding Plan',
+  'Choose based on where your account is registered':
+    'Choose based on where your account is registered',
+  'Enter Coding Plan API Key': 'Enter Coding Plan API Key',
+
+  // ============================================================================
+  // Coding Plan International Updates
+  // ============================================================================
+  'New model configurations are available for {{region}}. Update now?':
+    'New model configurations are available for {{region}}. Update now?',
+  '{{region}} configuration updated successfully. Model switched to "{{model}}".':
+    '{{region}} configuration updated successfully. Model switched to "{{model}}".',
+  'Authenticated successfully with {{region}}. API key and model configs saved to settings.json (backed up).':
+    'Authenticated successfully with {{region}}. API key and model configs saved to settings.json (backed up).',
+
+  // ============================================================================
+  // Context Usage Component
+  // ============================================================================
+  'Context Usage': 'Context Usage',
+  'No API response yet. Send a message to see actual usage.':
+    'No API response yet. Send a message to see actual usage.',
+  'Estimated pre-conversation overhead': 'Estimated pre-conversation overhead',
+  'Context window': 'Context window',
+  tokens: 'tokens',
+  Used: 'Used',
+  Free: 'Free',
+  'Autocompact buffer': 'Autocompact buffer',
+  'Usage by category': 'Usage by category',
+  'System prompt': 'System prompt',
+  'Built-in tools': 'Built-in tools',
+  'MCP tools': 'MCP tools',
+  'Memory files': 'Memory files',
+  Skills: 'Skills',
+  Messages: 'Messages',
+  'Show context window usage breakdown.':
+    'Show context window usage breakdown.',
+  'Run /context detail for per-item breakdown.':
+    'Run /context detail for per-item breakdown.',
+  'body loaded': 'body loaded',
+  memory: 'memory',
+  '{{region}} configuration updated successfully.':
+    '{{region}} configuration updated successfully.',
+  'Authenticated successfully with {{region}}. API key and model configs saved to settings.json.':
+    'Authenticated successfully with {{region}}. API key and model configs saved to settings.json.',
+  'Tip: Use /model to switch between available Coding Plan models.':
+    'Tip: Use /model to switch between available Coding Plan models.',
+
+  // ============================================================================
+  // Ask User Question Tool
+  // ============================================================================
+  'Please answer the following question(s):':
+    'Please answer the following question(s):',
+  'Cannot ask user questions in non-interactive mode. Please run in interactive mode to use this tool.':
+    'Cannot ask user questions in non-interactive mode. Please run in interactive mode to use this tool.',
+  'User declined to answer the questions.':
+    'User declined to answer the questions.',
+  'User has provided the following answers:':
+    'User has provided the following answers:',
+  'Failed to process user answers:': 'Failed to process user answers:',
+  'Type something...': 'Type something...',
+  Submit: 'Submit',
+  'Submit answers': 'Submit answers',
+  Cancel: 'Cancel',
+  'Your answers:': 'Your answers:',
+  '(not answered)': '(not answered)',
+  'Ready to submit your answers?': 'Ready to submit your answers?',
+  '↑/↓: Navigate | ←/→: Switch tabs | Enter: Select':
+    '↑/↓: Navigate | ←/→: Switch tabs | Enter: Select',
+  '↑/↓: Navigate | ←/→: Switch tabs | Space/Enter: Toggle | Esc: Cancel':
+    '↑/↓: Navigate | ←/→: Switch tabs | Space/Enter: Toggle | Esc: Cancel',
+  '↑/↓: Navigate | Space/Enter: Toggle | Esc: Cancel':
+    '↑/↓: Navigate | Space/Enter: Toggle | Esc: Cancel',
+  '↑/↓: Navigate | Enter: Select | Esc: Cancel':
+    '↑/↓: Navigate | Enter: Select | Esc: Cancel',
+
+  // ============================================================================
+  // Commands - Auth
+  // ============================================================================
+  'Configure Qwen authentication information with Qwen-OAuth or Alibaba Cloud Coding Plan':
+    'Configure Qwen authentication information with Qwen-OAuth or Alibaba Cloud Coding Plan',
+  'Authenticate using Qwen OAuth': 'Authenticate using Qwen OAuth',
+  'Authenticate using Alibaba Cloud Coding Plan':
+    'Authenticate using Alibaba Cloud Coding Plan',
+  'Region for Coding Plan (china/global)':
+    'Region for Coding Plan (china/global)',
+  'API key for Coding Plan': 'API key for Coding Plan',
+  'Show current authentication status': 'Show current authentication status',
+  'Authentication completed successfully.':
+    'Authentication completed successfully.',
+  'Starting Qwen OAuth authentication...':
+    'Starting Qwen OAuth authentication...',
+  'Successfully authenticated with Qwen OAuth.':
+    'Successfully authenticated with Qwen OAuth.',
+  'Failed to authenticate with Qwen OAuth: {{error}}':
+    'Failed to authenticate with Qwen OAuth: {{error}}',
+  'Processing Alibaba Cloud Coding Plan authentication...':
+    'Processing Alibaba Cloud Coding Plan authentication...',
+  'Successfully authenticated with Alibaba Cloud Coding Plan.':
+    'Successfully authenticated with Alibaba Cloud Coding Plan.',
+  'Failed to authenticate with Coding Plan: {{error}}':
+    'Failed to authenticate with Coding Plan: {{error}}',
+  '中国 (China)': '中国 (China)',
+  '阿里云百炼 (aliyun.com)': '阿里云百炼 (aliyun.com)',
+  Global: 'Global',
+  'Alibaba Cloud (alibabacloud.com)': 'Alibaba Cloud (alibabacloud.com)',
+  'Select region for Coding Plan:': 'Select region for Coding Plan:',
+  'Enter your Coding Plan API key: ': 'Enter your Coding Plan API key: ',
+  'Select authentication method:': 'Select authentication method:',
+  '\n=== Authentication Status ===\n': '\n=== Authentication Status ===\n',
+  '⚠️  No authentication method configured.\n':
+    '⚠️  No authentication method configured.\n',
+  'Run one of the following commands to get started:\n':
+    'Run one of the following commands to get started:\n',
+  '  qwen auth qwen-oauth     - Authenticate with Qwen OAuth (free tier)':
+    '  qwen auth qwen-oauth     - Authenticate with Qwen OAuth (free tier)',
+  '  qwen auth coding-plan      - Authenticate with Alibaba Cloud Coding Plan\n':
+    '  qwen auth coding-plan      - Authenticate with Alibaba Cloud Coding Plan\n',
+  'Or simply run:': 'Or simply run:',
+  '  qwen auth                - Interactive authentication setup\n':
+    '  qwen auth                - Interactive authentication setup\n',
+  '✓ Authentication Method: Qwen OAuth': '✓ Authentication Method: Qwen OAuth',
+  '  Type: Free tier (ending 2026-04-15)':
+    '  Type: Free tier (ending 2026-04-15)',
+  '  Limit: 100 requests/day': '  Limit: 100 requests/day',
+  '  Models: Qwen latest models\n': '  Models: Qwen latest models\n',
+  '✓ Authentication Method: Alibaba Cloud Coding Plan':
+    '✓ Authentication Method: Alibaba Cloud Coding Plan',
+  '中国 (China) - 阿里云百炼': '中国 (China) - 阿里云百炼',
+  'Global - Alibaba Cloud': 'Global - Alibaba Cloud',
+  '  Region: {{region}}': '  Region: {{region}}',
+  '  Current Model: {{model}}': '  Current Model: {{model}}',
+  '  Config Version: {{version}}': '  Config Version: {{version}}',
+  '  Status: API key configured\n': '  Status: API key configured\n',
+  '⚠️  Authentication Method: Alibaba Cloud Coding Plan (Incomplete)':
+    '⚠️  Authentication Method: Alibaba Cloud Coding Plan (Incomplete)',
+  '  Issue: API key not found in environment or settings\n':
+    '  Issue: API key not found in environment or settings\n',
+  '  Run `qwen auth coding-plan` to re-configure.\n':
+    '  Run `qwen auth coding-plan` to re-configure.\n',
+  '✓ Authentication Method: {{type}}': '✓ Authentication Method: {{type}}',
+  '  Status: Configured\n': '  Status: Configured\n',
+  'Failed to check authentication status: {{error}}':
+    'Failed to check authentication status: {{error}}',
+  'Select an option:': 'Select an option:',
+  'Raw mode not available. Please run in an interactive terminal.':
+    'Raw mode not available. Please run in an interactive terminal.',
+  '(Use ↑ ↓ arrows to navigate, Enter to select, Ctrl+C to exit)\n':
+    '(Use ↑ ↓ arrows to navigate, Enter to select, Ctrl+C to exit)\n',
+  compact: 'compact',
+  'Hide tool output and thinking for a cleaner view (toggle with Ctrl+O).':
+    'Hide tool output and thinking for a cleaner view (toggle with Ctrl+O).',
+  'Press Ctrl+O to show full tool output':
+    'Press Ctrl+O to show full tool output',
+
+  'Switch to plan mode or exit plan mode':
+    'Switch to plan mode or exit plan mode',
+  'Exited plan mode. Previous approval mode restored.':
+    'Exited plan mode. Previous approval mode restored.',
+  'Enabled plan mode. The agent will analyze and plan without executing tools.':
+    'Enabled plan mode. The agent will analyze and plan without executing tools.',
+  'Already in plan mode. Use "/plan exit" to exit plan mode.':
+    'Already in plan mode. Use "/plan exit" to exit plan mode.',
+  'Not in plan mode. Use "/plan" to enter plan mode first.':
+    'Not in plan mode. Use "/plan" to enter plan mode first.',
+
+  "Set up Qwen Code's status line UI": "Set up Qwen Code's status line UI",
 };

@@ -28,7 +28,7 @@ describe('SettingsSchema', () => {
         'mcp',
         'security',
         'advanced',
-        'experimental',
+        'webSearch',
       ];
 
       expectedSettings.forEach((setting) => {
@@ -80,7 +80,7 @@ describe('SettingsSchema', () => {
       ).toBeDefined();
       expect(
         getSettingsSchema().ui?.properties?.accessibility.properties
-          ?.disableLoadingPhrases.type,
+          ?.enableLoadingPhrases.type,
       ).toBe('boolean');
     });
 
@@ -108,6 +108,16 @@ describe('SettingsSchema', () => {
         getSettingsSchema().context.properties.fileFiltering.properties
           ?.enableRecursiveFileSearch,
       ).toBeDefined();
+    });
+
+    it('should have sandboxImage setting under tools', () => {
+      expect(getSettingsSchema().tools.properties.sandboxImage).toBeDefined();
+      expect(getSettingsSchema().tools.properties.sandboxImage.type).toBe(
+        'string',
+      );
+      expect(getSettingsSchema().tools.properties.sandboxImage.default).toBe(
+        undefined,
+      );
     });
 
     it('should have unique categories', () => {
@@ -157,9 +167,6 @@ describe('SettingsSchema', () => {
 
     it('should have showInDialog property configured', () => {
       // Check that user-facing settings are marked for dialog display
-      expect(
-        getSettingsSchema().ui.properties.showMemoryUsage.showInDialog,
-      ).toBe(true);
       expect(getSettingsSchema().general.properties.vimMode.showInDialog).toBe(
         true,
       );
@@ -167,34 +174,29 @@ describe('SettingsSchema', () => {
         true,
       );
       expect(
-        getSettingsSchema().general.properties.disableAutoUpdate.showInDialog,
+        getSettingsSchema().general.properties.enableAutoUpdate.showInDialog,
       ).toBe(true);
       expect(
         getSettingsSchema().ui.properties.hideWindowTitle.showInDialog,
-      ).toBe(true);
+      ).toBe(false);
       expect(getSettingsSchema().ui.properties.hideTips.showInDialog).toBe(
-        true,
-      );
-      expect(getSettingsSchema().ui.properties.hideBanner.showInDialog).toBe(
         true,
       );
       expect(
         getSettingsSchema().privacy.properties.usageStatisticsEnabled
           .showInDialog,
-      ).toBe(false);
+      ).toBe(true);
 
       // Check that advanced settings are hidden from dialog
       expect(getSettingsSchema().security.properties.auth.showInDialog).toBe(
         false,
       );
-      expect(getSettingsSchema().tools.properties.core.showInDialog).toBe(
-        false,
-      );
+      expect(getSettingsSchema().permissions.showInDialog).toBe(false);
       expect(getSettingsSchema().mcpServers.showInDialog).toBe(false);
       expect(getSettingsSchema().telemetry.showInDialog).toBe(false);
 
       // Check that some settings are appropriately hidden
-      expect(getSettingsSchema().ui.properties.theme.showInDialog).toBe(false); // Changed to false
+      expect(getSettingsSchema().ui.properties.theme.showInDialog).toBe(true);
       expect(getSettingsSchema().ui.properties.customThemes.showInDialog).toBe(
         false,
       ); // Managed via theme editor
@@ -203,13 +205,13 @@ describe('SettingsSchema', () => {
       ).toBe(false); // Experimental feature
       expect(getSettingsSchema().ui.properties.accessibility.showInDialog).toBe(
         false,
-      ); // Changed to false
+      );
       expect(
         getSettingsSchema().context.properties.fileFiltering.showInDialog,
-      ).toBe(false); // Changed to false
+      ).toBe(false);
       expect(
         getSettingsSchema().general.properties.preferredEditor.showInDialog,
-      ).toBe(false); // Changed to false
+      ).toBe(true);
       expect(
         getSettingsSchema().advanced.properties.autoConfigureMemory
           .showInDialog,
@@ -224,14 +226,14 @@ describe('SettingsSchema', () => {
         },
         context: {
           includeDirectories: ['/path/to/dir'],
-          loadMemoryFromIncludeDirectories: true,
+          loadFromIncludeDirectories: true,
         },
       };
 
       // TypeScript should not complain about these properties
       expect(settings.ui?.theme).toBe('dark');
       expect(settings.context?.includeDirectories).toEqual(['/path/to/dir']);
-      expect(settings.context?.loadMemoryFromIncludeDirectories).toBe(true);
+      expect(settings.context?.loadFromIncludeDirectories).toBe(true);
     });
 
     it('should have includeDirectories setting in schema', () => {
@@ -249,21 +251,19 @@ describe('SettingsSchema', () => {
       ).toEqual([]);
     });
 
-    it('should have loadMemoryFromIncludeDirectories setting in schema', () => {
+    it('should have loadFromIncludeDirectories setting in schema', () => {
       expect(
-        getSettingsSchema().context?.properties
-          .loadMemoryFromIncludeDirectories,
+        getSettingsSchema().context?.properties.loadFromIncludeDirectories,
       ).toBeDefined();
       expect(
-        getSettingsSchema().context?.properties.loadMemoryFromIncludeDirectories
-          .type,
+        getSettingsSchema().context?.properties.loadFromIncludeDirectories.type,
       ).toBe('boolean');
       expect(
-        getSettingsSchema().context?.properties.loadMemoryFromIncludeDirectories
+        getSettingsSchema().context?.properties.loadFromIncludeDirectories
           .category,
       ).toBe('Context');
       expect(
-        getSettingsSchema().context?.properties.loadMemoryFromIncludeDirectories
+        getSettingsSchema().context?.properties.loadFromIncludeDirectories
           .default,
       ).toBe(false);
     });
@@ -287,7 +287,7 @@ describe('SettingsSchema', () => {
       expect(
         getSettingsSchema().security.properties.folderTrust.properties.enabled
           .showInDialog,
-      ).toBe(true);
+      ).toBe(false);
     });
 
     it('should have debugKeystrokeLogging setting in schema', () => {
@@ -310,7 +310,7 @@ describe('SettingsSchema', () => {
       expect(
         getSettingsSchema().general.properties.debugKeystrokeLogging
           .showInDialog,
-      ).toBe(true);
+      ).toBe(false);
       expect(
         getSettingsSchema().general.properties.debugKeystrokeLogging
           .description,
