@@ -251,7 +251,7 @@
         "usageStatisticsEnabled": {
           "description": "Enable collection of usage statistics",
           "type": "boolean",
-          "default": true
+          "default": false
         }
       }
     },

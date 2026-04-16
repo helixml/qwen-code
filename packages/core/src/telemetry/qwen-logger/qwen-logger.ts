@@ -106,7 +106,6 @@ export interface LogResponse {
 // Singleton class for batch posting log events to RUM. When a new event comes in, the elapsed time
 // is checked and events are flushed to RUM if at least a minute has passed since the last flush.
 export class QwenLogger {
-  private static instance: QwenLogger;
   private config?: Config;
   private debugLogger: DebugLogger;
   private readonly installationManager: InstallationManager;
@@ -165,14 +164,10 @@ export class QwenLogger {
     return `user-${installationId ?? 'unknown'}`;
   }
 
-  static getInstance(config?: Config): QwenLogger | undefined {
-    if (config === undefined || !config?.getUsageStatisticsEnabled())
-      return undefined;
-    if (!QwenLogger.instance) {
-      QwenLogger.instance = new QwenLogger(config);
-    }
-
-    return QwenLogger.instance;
+  static getInstance(_config?: Config): QwenLogger | undefined {
+    // Helix fork: telemetry to Alibaba RUM is unconditionally disabled.
+    // We do not send usage data to external endpoints.
+    return undefined;
   }
 
   enqueueLogEvent(event: RumEvent): void {

@@ -684,7 +684,7 @@ export class Config {
       name: 'Qwen-Coder',
       email: 'qwen-coder@alibabacloud.com',
     };
-    this.usageStatisticsEnabled = params.usageStatisticsEnabled ?? true;
+    this.usageStatisticsEnabled = params.usageStatisticsEnabled ?? false;
     this.outputLanguageFilePath = params.outputLanguageFilePath;
 
     this.fileFiltering = {
