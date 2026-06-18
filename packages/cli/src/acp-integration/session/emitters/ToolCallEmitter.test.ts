@@ -71,12 +71,13 @@ describe('ToolCallEmitter', () => {
       expect(sendUpdateSpy).toHaveBeenCalledWith({
         sessionUpdate: 'tool_call',
         toolCallId: 'call-123',
-        status: 'in_progress',
+        status: 'pending',
         title: 'unknown_tool', // Falls back to tool name
         content: [],
         locations: [],
         kind: 'other',
         rawInput: { arg1: 'value1' },
+        _meta: { toolName: 'unknown_tool' },
       });
     });
 
@@ -94,12 +95,13 @@ describe('ToolCallEmitter', () => {
       expect(sendUpdateSpy).toHaveBeenCalledWith({
         sessionUpdate: 'tool_call',
         toolCallId: 'call-456',
-        status: 'in_progress',
+        status: 'pending',
         title: 'edit_file: Test tool description',
         content: [],
         locations: [{ path: '/test/file.ts', line: 10 }],
         kind: 'edit',
         rawInput: { path: '/test.ts' },
+        _meta: { toolName: 'edit_file' },
       });
     });
 
@@ -123,6 +125,7 @@ describe('ToolCallEmitter', () => {
       expect(sendUpdateSpy).toHaveBeenCalledWith(
         expect.objectContaining({
           rawInput: {},
+          _meta: { toolName: 'test_tool' },
         }),
       );
     });
@@ -144,12 +147,13 @@ describe('ToolCallEmitter', () => {
       expect(sendUpdateSpy).toHaveBeenCalledWith({
         sessionUpdate: 'tool_call',
         toolCallId: 'call-fail',
-        status: 'in_progress',
+        status: 'pending',
         title: 'failing_tool', // Fallback to tool name
         content: [],
         locations: [], // Fallback to empty
         kind: 'other', // Fallback to other
         rawInput: { invalid: true },
+        _meta: { toolName: 'failing_tool' },
       });
     });
   });
@@ -170,6 +174,7 @@ describe('ToolCallEmitter', () => {
           toolCallId: 'call-123',
           status: 'completed',
           rawOutput: 'Tool completed successfully',
+          _meta: { toolName: 'test_tool' },
         }),
       );
     });
@@ -193,6 +198,7 @@ describe('ToolCallEmitter', () => {
             content: { type: 'text', text: 'Something went wrong' },
           },
         ],
+        _meta: { toolName: 'test_tool' },
       });
     });
 
@@ -222,6 +228,7 @@ describe('ToolCallEmitter', () => {
               newText: 'new content',
             },
           ],
+          _meta: { toolName: 'edit_file' },
         }),
       );
     });
@@ -247,6 +254,7 @@ describe('ToolCallEmitter', () => {
             },
           ],
           rawOutput: 'raw output',
+          _meta: { toolName: 'test_tool' },
         }),
       );
     });
@@ -264,6 +272,7 @@ describe('ToolCallEmitter', () => {
         toolCallId: 'call-empty',
         status: 'completed',
         content: [],
+        _meta: { toolName: 'test_tool' },
       });
     });
 
@@ -343,7 +352,7 @@ describe('ToolCallEmitter', () => {
     it('should emit tool_call_update with failed status and error message', async () => {
       const error = new Error('Connection timeout');
 
-      await emitter.emitError('call-123', error);
+      await emitter.emitError('call-123', 'test_tool', error);
 
       expect(sendUpdateSpy).toHaveBeenCalledWith({
         sessionUpdate: 'tool_call_update',
@@ -355,6 +364,7 @@ describe('ToolCallEmitter', () => {
             content: { type: 'text', text: 'Connection timeout' },
           },
         ],
+        _meta: { toolName: 'test_tool' },
       });
     });
   });
@@ -493,11 +503,12 @@ describe('ToolCallEmitter', () => {
                 type: 'content',
                 content: {
                   type: 'text',
-                  text: '{"output":"test output"}',
+                  text: 'test output',
                 },
               },
             ],
             rawOutput: { unknownField: 'value', nested: { data: 123 } },
+            _meta: { toolName: 'test_tool' },
           }),
         );
       });
@@ -519,6 +530,7 @@ describe('ToolCallEmitter', () => {
             toolCallId: 'call-extra',
             status: 'completed',
             rawOutput: 'Result text',
+            _meta: { toolName: 'test_tool' },
           }),
         );
       });
@@ -533,6 +545,7 @@ describe('ToolCallEmitter', () => {
 
         const call = sendUpdateSpy.mock.calls[0][0];
         expect(call.rawOutput).toBeUndefined();
+        expect(call._meta).toEqual({ toolName: 'test_tool' });
       });
     });
 
@@ -623,6 +636,7 @@ describe('ToolCallEmitter', () => {
               content: { type: 'text', text: 'Text content from message' },
             },
           ],
+          _meta: { toolName: 'test_tool' },
         });
       });
 
@@ -650,10 +664,11 @@ describe('ToolCallEmitter', () => {
             content: [
               {
                 type: 'content',
-                content: { type: 'text', text: '{"output":"Function output"}' },
+                content: { type: 'text', text: 'Function output' },
               },
             ],
             rawOutput: 'raw result',
+            _meta: { toolName: 'test_tool' },
           }),
         );
       });

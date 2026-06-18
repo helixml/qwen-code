@@ -7,10 +7,13 @@
 import { Box, Static } from 'ink';
 import { HistoryItemDisplay } from './HistoryItemDisplay.js';
 import { ShowMoreLines } from './ShowMoreLines.js';
+import { Notifications } from './Notifications.js';
 import { OverflowProvider } from '../contexts/OverflowContext.js';
 import { useUIState } from '../contexts/UIStateContext.js';
 import { useAppContext } from '../contexts/AppContext.js';
 import { AppHeader } from './AppHeader.js';
+import { DebugModeNotification } from './DebugModeNotification.js';
+import { useCompactMode } from '../contexts/CompactModeContext.js';
 
 // Limit Gemini messages to a very high number of lines to mitigate performance
 // issues in the worst case if we somehow get an enormous response from Gemini.
@@ -21,8 +24,10 @@ const MAX_GEMINI_MESSAGE_LINES = 65536;
 export const MainContent = () => {
   const { version } = useAppContext();
   const uiState = useUIState();
+  const { frozenSnapshot } = useCompactMode();
   const {
     pendingHistoryItems,
+    terminalWidth,
     mainAreaWidth,
     staticAreaMaxItemHeight,
     availableTerminalHeight,
@@ -31,12 +36,15 @@ export const MainContent = () => {
   return (
     <>
       <Static
-        key={uiState.historyRemountKey}
+        key={`${uiState.historyRemountKey}-${uiState.currentModel}`}
         items={[
           <AppHeader key="app-header" version={version} />,
+          <DebugModeNotification key="debug-notification" />,
+          <Notifications key="notifications" />,
           ...uiState.history.map((h) => (
             <HistoryItemDisplay
-              terminalWidth={mainAreaWidth}
+              terminalWidth={terminalWidth}
+              mainAreaWidth={mainAreaWidth}
               availableTerminalHeight={staticAreaMaxItemHeight}
               availableTerminalHeightGemini={MAX_GEMINI_MESSAGE_LINES}
               key={h.id}
@@ -51,20 +59,26 @@ export const MainContent = () => {
       </Static>
       <OverflowProvider>
         <Box flexDirection="column">
-          {pendingHistoryItems.map((item, i) => (
-            <HistoryItemDisplay
-              key={i}
-              availableTerminalHeight={
-                uiState.constrainHeight ? availableTerminalHeight : undefined
-              }
-              terminalWidth={mainAreaWidth}
-              item={{ ...item, id: 0 }}
-              isPending={true}
-              isFocused={!uiState.isEditorDialogOpen}
-              activeShellPtyId={uiState.activePtyId}
-              embeddedShellFocused={uiState.embeddedShellFocused}
-            />
-          ))}
+          {(frozenSnapshot ?? pendingHistoryItems).map((item, i) => {
+            const isFrozen = frozenSnapshot !== null;
+            return (
+              <HistoryItemDisplay
+                key={i}
+                availableTerminalHeight={
+                  uiState.constrainHeight ? availableTerminalHeight : undefined
+                }
+                terminalWidth={terminalWidth}
+                mainAreaWidth={mainAreaWidth}
+                item={{ ...item, id: 0 }}
+                isPending={true}
+                isFocused={isFrozen ? false : !uiState.isEditorDialogOpen}
+                activeShellPtyId={isFrozen ? undefined : uiState.activePtyId}
+                embeddedShellFocused={
+                  isFrozen ? false : uiState.embeddedShellFocused
+                }
+              />
+            );
+          })}
           <ShowMoreLines constrainHeight={uiState.constrainHeight} />
         </Box>
       </OverflowProvider>

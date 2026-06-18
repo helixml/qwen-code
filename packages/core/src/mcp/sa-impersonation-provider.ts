@@ -13,6 +13,10 @@ import type {
 import { GoogleAuth } from 'google-auth-library';
 import type { MCPServerConfig } from '../config/config.js';
 import type { OAuthClientProvider } from '@modelcontextprotocol/sdk/client/auth.js';
+import { MCP_SA_IMPERSONATION_CLIENT_NAME } from './constants.js';
+import { createDebugLogger } from '../utils/debugLogger.js';
+
+const debugLogger = createDebugLogger('MCP_SA_IMPERSONATION');
 
 const fiveMinBufferMs = 5 * 60 * 1000;
 
@@ -32,7 +36,7 @@ export class ServiceAccountImpersonationProvider
   // Properties required by OAuthClientProvider, with no-op values
   readonly redirectUrl = '';
   readonly clientMetadata: OAuthClientMetadata = {
-    client_name: 'Gemini CLI (Service Account Impersonation)',
+    client_name: MCP_SA_IMPERSONATION_CLIENT_NAME,
     redirect_uris: [],
     grant_types: [],
     response_types: [],
@@ -104,11 +108,11 @@ export class ServiceAccountImpersonationProvider
       idToken = res.data.token;
 
       if (!idToken || idToken.length === 0) {
-        console.error('Failed to get ID token from Google');
+        debugLogger.error('Failed to get ID token from Google');
         return undefined;
       }
     } catch (e) {
-      console.error('Failed to fetch ID token from Google:', e);
+      debugLogger.error(`Failed to fetch ID token from Google: ${e}`);
       return undefined;
     }
 
@@ -162,7 +166,9 @@ export class ServiceAccountImpersonationProvider
         return payload.exp * 1000; // Convert seconds to milliseconds
       }
     } catch (e) {
-      console.error('Failed to parse ID token for expiry time with error:', e);
+      debugLogger.error(
+        `Failed to parse ID token for expiry time with error: ${e}`,
+      );
     }
 
     // Return undefined if try block fails or 'exp' is missing/invalid

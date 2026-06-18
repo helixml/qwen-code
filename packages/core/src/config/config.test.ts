@@ -8,6 +8,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import type { Mock } from 'vitest';
 import type { ConfigParameters, SandboxConfig } from './config.js';
 import { Config, ApprovalMode } from './config.js';
+import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { setGeminiMdFilename as mockSetGeminiMdFilename } from '../tools/memoryTool.js';
 import {
@@ -15,11 +16,16 @@ import {
   DEFAULT_OTLP_ENDPOINT,
   QwenLogger,
 } from '../telemetry/index.js';
-import type { ContentGeneratorConfig } from '../core/contentGenerator.js';
+import type {
+  ContentGenerator,
+  ContentGeneratorConfig,
+} from '../core/contentGenerator.js';
 import { DEFAULT_DASHSCOPE_BASE_URL } from '../core/openaiContentGenerator/constants.js';
 import {
   AuthType,
+  createContentGenerator,
   createContentGeneratorConfig,
+  resolveContentGeneratorConfigWithSources,
 } from '../core/contentGenerator.js';
 import { GeminiClient } from '../core/client.js';
 import { GitService } from '../services/gitService.js';
@@ -31,6 +37,8 @@ import { RipGrepTool } from '../tools/ripGrep.js';
 import { logRipgrepFallback } from '../telemetry/loggers.js';
 import { RipgrepFallbackEvent } from '../telemetry/types.js';
 import { ToolRegistry } from '../tools/tool-registry.js';
+import { fireNotificationHook } from '../core/toolHookTriggers.js';
+import type { MessageBus } from '../confirmation-bus/message-bus.js';
 
 function createToolMock(toolName: string) {
   const ToolMock = vi.fn();
@@ -50,6 +58,9 @@ vi.mock('node:fs', async (importOriginal) => {
       isDirectory: vi.fn().mockReturnValue(true),
     }),
     realpathSync: vi.fn((path) => path),
+    mkdirSync: vi.fn(),
+    writeFileSync: vi.fn(),
+    readFileSync: vi.fn(),
   };
   return {
     ...mocked,
@@ -70,7 +81,9 @@ vi.mock('../tools/tool-registry', () => {
 });
 
 vi.mock('../utils/memoryDiscovery.js', () => ({
-  loadServerHierarchicalMemory: vi.fn(),
+  loadServerHierarchicalMemory: vi
+    .fn()
+    .mockResolvedValue({ memoryContent: '', fileCount: 0 }),
 }));
 
 // Mock individual tools if their constructors are complex or have side effects
@@ -111,6 +124,7 @@ vi.mock('../tools/memoryTool', () => ({
   MemoryTool: createToolMock('save_memory'),
   setGeminiMdFilename: vi.fn(),
   getCurrentGeminiMdFilename: vi.fn(() => 'QWEN.md'), // Mock the original filename
+  getAllGeminiMdFilenames: vi.fn(() => ['QWEN.md', 'AGENTS.md']),
   DEFAULT_CONTEXT_FILENAME: 'QWEN.md',
   QWEN_CONFIG_DIR: '.qwen',
 }));
@@ -152,6 +166,28 @@ vi.mock('../services/gitService.js', () => {
   return { GitService: GitServiceMock };
 });
 
+vi.mock('../skills/skill-manager.js', () => {
+  const SkillManagerMock = vi.fn();
+  SkillManagerMock.prototype.startWatching = vi
+    .fn()
+    .mockResolvedValue(undefined);
+  SkillManagerMock.prototype.stopWatching = vi.fn();
+  SkillManagerMock.prototype.listSkills = vi.fn().mockResolvedValue([]);
+  SkillManagerMock.prototype.addChangeListener = vi.fn();
+  SkillManagerMock.prototype.removeChangeListener = vi.fn();
+  return { SkillManager: SkillManagerMock };
+});
+
+vi.mock('../subagents/subagent-manager.js', () => {
+  const SubagentManagerMock = vi.fn();
+  SubagentManagerMock.prototype.loadSessionSubagents = vi.fn();
+  SubagentManagerMock.prototype.addChangeListener = vi
+    .fn()
+    .mockReturnValue(() => {});
+  SubagentManagerMock.prototype.listSubagents = vi.fn().mockResolvedValue([]);
+  return { SubagentManager: SubagentManagerMock };
+});
+
 vi.mock('../ide/ide-client.js', () => ({
   IdeClient: {
     getInstance: vi.fn().mockResolvedValue({
@@ -163,12 +199,11 @@ vi.mock('../ide/ide-client.js', () => ({
 }));
 
 import { BaseLlmClient } from '../core/baseLlmClient.js';
-import { tokenLimit } from '../core/tokenLimits.js';
-import { uiTelemetryService } from '../telemetry/index.js';
 
 vi.mock('../core/baseLlmClient.js');
-vi.mock('../core/tokenLimits.js', () => ({
-  tokenLimit: vi.fn(),
+// Mock fireNotificationHook from toolHookTriggers
+vi.mock('../core/toolHookTriggers.js', () => ({
+  fireNotificationHook: vi.fn().mockResolvedValue({}),
 }));
 
 describe('Server Config (config.ts)', () => {
@@ -185,7 +220,6 @@ describe('Server Config (config.ts)', () => {
   const TARGET_DIR = '/path/to/target';
   const DEBUG_MODE = false;
   const QUESTION = 'test question';
-  const FULL_CONTEXT = false;
   const USER_MEMORY = 'Test User Memory';
   const TELEMETRY_SETTINGS = { enabled: false };
   const EMBEDDING_MODEL = 'gemini-embedding';
@@ -196,11 +230,11 @@ describe('Server Config (config.ts)', () => {
     targetDir: TARGET_DIR,
     debugMode: DEBUG_MODE,
     question: QUESTION,
-    fullContext: FULL_CONTEXT,
     userMemory: USER_MEMORY,
     telemetry: TELEMETRY_SETTINGS,
     model: MODEL,
     usageStatisticsEnabled: false,
+    overrideExtensions: [],
   };
 
   beforeEach(() => {
@@ -209,6 +243,39 @@ describe('Server Config (config.ts)', () => {
     vi.spyOn(QwenLogger.prototype, 'logStartSessionEvent').mockImplementation(
       async () => undefined,
     );
+
+    // Setup default mock for resolveContentGeneratorConfigWithSources
+    vi.mocked(resolveContentGeneratorConfigWithSources).mockImplementation(
+      (_config, authType, generationConfig) => ({
+        config: {
+          ...generationConfig,
+          authType,
+          model: generationConfig?.model || MODEL,
+          apiKey: 'test-key',
+        } as ContentGeneratorConfig,
+        sources: {},
+      }),
+    );
+  });
+
+  it('should store a system prompt override', () => {
+    const config = new Config({
+      ...baseParams,
+      systemPrompt: 'You are a custom system prompt.',
+    });
+
+    expect(config.getSystemPrompt()).toBe('You are a custom system prompt.');
+    expect(config.getAppendSystemPrompt()).toBeUndefined();
+  });
+
+  it('should store an appended system prompt', () => {
+    const config = new Config({
+      ...baseParams,
+      appendSystemPrompt: 'Be extra concise.',
+    });
+
+    expect(config.getAppendSystemPrompt()).toBe('Be extra concise.');
+    expect(config.getSystemPrompt()).toBeUndefined();
   });
 
   describe('initialize', () => {
@@ -256,48 +323,86 @@ describe('Server Config (config.ts)', () => {
       const mockContentConfig = {
         apiKey: 'test-key',
         model: 'qwen3-coder-plus',
+        authType,
       };
 
-      vi.mocked(createContentGeneratorConfig).mockReturnValue(
-        mockContentConfig,
-      );
-
-      // Set fallback mode to true to ensure it gets reset
-      config.setFallbackMode(true);
-      expect(config.isInFallbackMode()).toBe(true);
+      vi.mocked(resolveContentGeneratorConfigWithSources).mockReturnValue({
+        config: mockContentConfig as ContentGeneratorConfig,
+        sources: {},
+      });
 
       await config.refreshAuth(authType);
 
-      expect(createContentGeneratorConfig).toHaveBeenCalledWith(
+      expect(resolveContentGeneratorConfigWithSources).toHaveBeenCalledWith(
         config,
         authType,
-        {
+        expect.objectContaining({
           model: MODEL,
-          baseUrl: DEFAULT_DASHSCOPE_BASE_URL,
-        },
+        }),
+        expect.anything(),
+        expect.anything(),
       );
       // Verify that contentGeneratorConfig is updated
       expect(config.getContentGeneratorConfig()).toEqual(mockContentConfig);
       expect(GeminiClient).toHaveBeenCalledWith(config);
-      // Verify that fallback mode is reset
-      expect(config.isInFallbackMode()).toBe(false);
     });
 
-    it('should strip thoughts when switching from GenAI to Vertex', async () => {
-      const config = new Config(baseParams);
+    it('should fire auth_success notification hook when hooks are enabled', async () => {
+      const mockMessageBus = { request: vi.fn() };
+      const config = new Config({
+        ...baseParams,
+        disableAllHooks: false,
+      });
+      // Set messageBus using the setter
+      config.setMessageBus(mockMessageBus as unknown as MessageBus);
 
-      vi.mocked(createContentGeneratorConfig).mockImplementation(
-        (_: Config, authType: AuthType | undefined) =>
-          ({ authType }) as unknown as ContentGeneratorConfig,
+      const authType = AuthType.USE_GEMINI;
+      const mockContentConfig = {
+        apiKey: 'test-key',
+        model: 'qwen3-coder-plus',
+        authType,
+      };
+
+      vi.mocked(resolveContentGeneratorConfigWithSources).mockReturnValue({
+        config: mockContentConfig as ContentGeneratorConfig,
+        sources: {},
+      });
+
+      await config.refreshAuth(authType);
+
+      // Verify that fireNotificationHook was called with correct parameters
+      expect(fireNotificationHook).toHaveBeenCalledWith(
+        mockMessageBus,
+        `Successfully authenticated with ${authType}`,
+        'auth_success',
+        'Authentication successful',
       );
+    });
 
-      await config.refreshAuth(AuthType.USE_GEMINI);
+    it('should not fire notification hook when hooks are disabled', async () => {
+      const config = new Config({
+        ...baseParams,
+        disableAllHooks: true,
+      });
+      const authType = AuthType.USE_GEMINI;
+      const mockContentConfig = {
+        apiKey: 'test-key',
+        model: 'qwen3-coder-plus',
+        authType,
+      };
 
-      await config.refreshAuth(AuthType.LOGIN_WITH_GOOGLE);
+      vi.mocked(resolveContentGeneratorConfigWithSources).mockReturnValue({
+        config: mockContentConfig as ContentGeneratorConfig,
+        sources: {},
+      });
 
-      expect(
-        config.getGeminiClient().stripThoughtsFromHistory,
-      ).toHaveBeenCalledWith();
+      // Clear any previous calls
+      vi.mocked(fireNotificationHook).mockClear();
+
+      await config.refreshAuth(authType);
+
+      // Verify that fireNotificationHook was not called
+      expect(fireNotificationHook).not.toHaveBeenCalled();
     });
 
     it('should not strip thoughts when switching from Vertex to GenAI', async () => {
@@ -315,6 +420,129 @@ describe('Server Config (config.ts)', () => {
       expect(
         config.getGeminiClient().stripThoughtsFromHistory,
       ).not.toHaveBeenCalledWith();
+    });
+  });
+
+  describe('model switching optimization (QWEN_OAUTH)', () => {
+    it('should switch qwen-oauth model in-place without refreshing auth when safe', async () => {
+      const config = new Config(baseParams);
+
+      const mockContentConfig: ContentGeneratorConfig = {
+        authType: AuthType.QWEN_OAUTH,
+        model: 'coder-model',
+        apiKey: 'QWEN_OAUTH_DYNAMIC_TOKEN',
+        baseUrl: DEFAULT_DASHSCOPE_BASE_URL,
+        timeout: 60000,
+        maxRetries: 3,
+      } as ContentGeneratorConfig;
+
+      vi.mocked(resolveContentGeneratorConfigWithSources).mockImplementation(
+        (_config, authType, generationConfig) => ({
+          config: {
+            ...mockContentConfig,
+            authType,
+            model: generationConfig?.model ?? mockContentConfig.model,
+          } as ContentGeneratorConfig,
+          sources: {},
+        }),
+      );
+      vi.mocked(createContentGenerator).mockResolvedValue({
+        generateContent: vi.fn(),
+        generateContentStream: vi.fn(),
+        countTokens: vi.fn(),
+        embedContent: vi.fn(),
+      } as unknown as ContentGenerator);
+
+      // Establish initial qwen-oauth content generator config/content generator.
+      await config.refreshAuth(AuthType.QWEN_OAUTH);
+
+      // Spy after initial refresh to ensure model switch does not re-trigger refreshAuth.
+      const refreshSpy = vi.spyOn(config, 'refreshAuth');
+
+      await config.switchModel(AuthType.QWEN_OAUTH, 'coder-model');
+
+      expect(config.getModel()).toBe('coder-model');
+      expect(refreshSpy).not.toHaveBeenCalled();
+      // Called once during initial refreshAuth + once during handleModelChange diffing.
+      expect(
+        vi.mocked(resolveContentGeneratorConfigWithSources),
+      ).toHaveBeenCalledTimes(2);
+      expect(vi.mocked(createContentGenerator)).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe('model switching with different credentials (OpenAI)', () => {
+    it('should refresh auth when switching to model with different envKey', async () => {
+      // This test verifies the fix for switching between modelProvider models
+      // with different envKeys (e.g., deepseek-chat with DEEPSEEK_API_KEY)
+      const configWithModelProviders = new Config({
+        ...baseParams,
+        authType: AuthType.USE_OPENAI,
+        modelProvidersConfig: {
+          openai: [
+            {
+              id: 'model-a',
+              name: 'Model A',
+              baseUrl: 'https://api.example.com/v1',
+              envKey: 'API_KEY_A',
+            },
+            {
+              id: 'model-b',
+              name: 'Model B',
+              baseUrl: 'https://api.example.com/v1',
+              envKey: 'API_KEY_B',
+            },
+          ],
+        },
+      });
+
+      const mockContentConfigA: ContentGeneratorConfig = {
+        authType: AuthType.USE_OPENAI,
+        model: 'model-a',
+        apiKey: 'key-a',
+        baseUrl: 'https://api.example.com/v1',
+      } as ContentGeneratorConfig;
+
+      const mockContentConfigB: ContentGeneratorConfig = {
+        authType: AuthType.USE_OPENAI,
+        model: 'model-b',
+        apiKey: 'key-b',
+        baseUrl: 'https://api.example.com/v1',
+      } as ContentGeneratorConfig;
+
+      vi.mocked(resolveContentGeneratorConfigWithSources).mockImplementation(
+        (_config, _authType, generationConfig) => {
+          const model = generationConfig?.model;
+          return {
+            config:
+              model === 'model-b' ? mockContentConfigB : mockContentConfigA,
+            sources: {},
+          };
+        },
+      );
+
+      vi.mocked(createContentGenerator).mockResolvedValue({
+        generateContent: vi.fn(),
+        generateContentStream: vi.fn(),
+        countTokens: vi.fn(),
+        embedContent: vi.fn(),
+      } as unknown as ContentGenerator);
+
+      // Initialize with model-a
+      await configWithModelProviders.refreshAuth(AuthType.USE_OPENAI);
+
+      // Spy on refreshAuth to verify it's called when switching to model-b
+      const refreshSpy = vi.spyOn(configWithModelProviders, 'refreshAuth');
+
+      // Switch to model-b (different envKey)
+      await configWithModelProviders.switchModel(
+        AuthType.USE_OPENAI,
+        'model-b',
+      );
+
+      // Should trigger full refresh because envKey changed
+      expect(refreshSpy).toHaveBeenCalledWith(AuthType.USE_OPENAI);
+      expect(configWithModelProviders.getModel()).toBe('model-b');
     });
   });
 
@@ -893,29 +1121,8 @@ describe('Server Config (config.ts)', () => {
   });
 
   describe('getTruncateToolOutputThreshold', () => {
-    beforeEach(() => {
-      vi.clearAllMocks();
-    });
-
-    it('should return the calculated threshold when it is smaller than the default', () => {
+    it('should return the default threshold', () => {
       const config = new Config(baseParams);
-      vi.mocked(tokenLimit).mockReturnValue(8000);
-      vi.mocked(uiTelemetryService.getLastPromptTokenCount).mockReturnValue(
-        2000,
-      );
-      // 4 * (8000 - 2000) = 4 * 6000 = 24000
-      // default is 25_000
-      expect(config.getTruncateToolOutputThreshold()).toBe(24000);
-    });
-
-    it('should return the default threshold when the calculated value is larger', () => {
-      const config = new Config(baseParams);
-      vi.mocked(tokenLimit).mockReturnValue(2_000_000);
-      vi.mocked(uiTelemetryService.getLastPromptTokenCount).mockReturnValue(
-        500_000,
-      );
-      // 4 * (2_000_000 - 500_000) = 4 * 1_500_000 = 6_000_000
-      // default is 25_000
       expect(config.getTruncateToolOutputThreshold()).toBe(25_000);
     });
 
@@ -925,21 +1132,18 @@ describe('Server Config (config.ts)', () => {
         truncateToolOutputThreshold: 50000,
       };
       const config = new Config(customParams);
-      vi.mocked(tokenLimit).mockReturnValue(8000);
-      vi.mocked(uiTelemetryService.getLastPromptTokenCount).mockReturnValue(
-        2000,
-      );
-      // 4 * (8000 - 2000) = 4 * 6000 = 24000
-      // custom threshold is 50000
-      expect(config.getTruncateToolOutputThreshold()).toBe(24000);
-
-      vi.mocked(tokenLimit).mockReturnValue(32000);
-      vi.mocked(uiTelemetryService.getLastPromptTokenCount).mockReturnValue(
-        1000,
-      );
-      // 4 * (32000 - 1000) = 124000
-      // custom threshold is 50000
       expect(config.getTruncateToolOutputThreshold()).toBe(50000);
+    });
+
+    it('should return infinity when threshold is zero or negative', () => {
+      const customParams = {
+        ...baseParams,
+        truncateToolOutputThreshold: 0,
+      };
+      const config = new Config(customParams);
+      expect(config.getTruncateToolOutputThreshold()).toBe(
+        Number.POSITIVE_INFINITY,
+      );
     });
   });
 });
@@ -1001,6 +1205,103 @@ describe('setApprovalMode with folder trust', () => {
     expect(() => config.setApprovalMode(ApprovalMode.AUTO_EDIT)).not.toThrow();
     expect(() => config.setApprovalMode(ApprovalMode.DEFAULT)).not.toThrow();
     expect(() => config.setApprovalMode(ApprovalMode.PLAN)).not.toThrow();
+  });
+
+  describe('prePlanMode tracking', () => {
+    it('should save pre-plan mode when entering plan mode', () => {
+      const config = new Config(baseParams);
+      vi.spyOn(config, 'isTrustedFolder').mockReturnValue(true);
+
+      config.setApprovalMode(ApprovalMode.AUTO_EDIT);
+      config.setApprovalMode(ApprovalMode.PLAN);
+      expect(config.getPrePlanMode()).toBe(ApprovalMode.AUTO_EDIT);
+    });
+
+    it('should clear pre-plan mode when leaving plan mode', () => {
+      const config = new Config(baseParams);
+      vi.spyOn(config, 'isTrustedFolder').mockReturnValue(true);
+
+      config.setApprovalMode(ApprovalMode.AUTO_EDIT);
+      config.setApprovalMode(ApprovalMode.PLAN);
+      config.setApprovalMode(ApprovalMode.DEFAULT);
+      expect(config.getPrePlanMode()).toBe(ApprovalMode.DEFAULT);
+    });
+
+    it('should default to DEFAULT when no pre-plan mode was recorded', () => {
+      const config = new Config(baseParams);
+      expect(config.getPrePlanMode()).toBe(ApprovalMode.DEFAULT);
+    });
+
+    it('should not update pre-plan mode when already in plan mode', () => {
+      const config = new Config(baseParams);
+      vi.spyOn(config, 'isTrustedFolder').mockReturnValue(true);
+
+      config.setApprovalMode(ApprovalMode.YOLO);
+      config.setApprovalMode(ApprovalMode.PLAN);
+      // Setting PLAN again should not overwrite prePlanMode
+      config.setApprovalMode(ApprovalMode.PLAN);
+      expect(config.getPrePlanMode()).toBe(ApprovalMode.YOLO);
+    });
+  });
+
+  describe('plan file persistence', () => {
+    it('should save plan to disk', () => {
+      const config = new Config(baseParams);
+
+      config.savePlan('# My Plan\n1. Step one\n2. Step two');
+
+      expect(fs.mkdirSync).toHaveBeenCalledWith(
+        expect.stringContaining('plans'),
+        { recursive: true },
+      );
+      expect(fs.writeFileSync).toHaveBeenCalledWith(
+        expect.stringContaining('.md'),
+        '# My Plan\n1. Step one\n2. Step two',
+        'utf-8',
+      );
+    });
+
+    it('should load plan from disk', () => {
+      const config = new Config(baseParams);
+      (fs.readFileSync as Mock).mockReturnValue('# Saved Plan');
+
+      const plan = config.loadPlan();
+      expect(plan).toBe('# Saved Plan');
+    });
+
+    it('should return undefined when no plan file exists', () => {
+      const config = new Config(baseParams);
+      const enoentError = new Error('ENOENT') as NodeJS.ErrnoException;
+      enoentError.code = 'ENOENT';
+      (fs.readFileSync as Mock).mockImplementation(() => {
+        throw enoentError;
+      });
+
+      const plan = config.loadPlan();
+      expect(plan).toBeUndefined();
+    });
+
+    it('should rethrow non-ENOENT errors from loadPlan', () => {
+      const config = new Config(baseParams);
+      const permError = new Error('EACCES') as NodeJS.ErrnoException;
+      permError.code = 'EACCES';
+      (fs.readFileSync as Mock).mockImplementation(() => {
+        throw permError;
+      });
+
+      expect(() => config.loadPlan()).toThrow('EACCES');
+    });
+
+    it('should use session ID in plan file path', () => {
+      const config = new Config({
+        ...baseParams,
+        sessionId: 'test-session-123',
+      });
+
+      const filePath = config.getPlanFilePath();
+      expect(filePath).toContain('test-session-123');
+      expect(filePath).toMatch(/\.md$/);
+    });
   });
 
   describe('registerCoreTools', () => {
@@ -1152,7 +1453,6 @@ describe('BaseLlmClient Lifecycle', () => {
   const TARGET_DIR = '/path/to/target';
   const DEBUG_MODE = false;
   const QUESTION = 'test question';
-  const FULL_CONTEXT = false;
   const USER_MEMORY = 'Test User Memory';
   const TELEMETRY_SETTINGS = { enabled: false };
   const EMBEDDING_MODEL = 'gemini-embedding';
@@ -1163,7 +1463,6 @@ describe('BaseLlmClient Lifecycle', () => {
     targetDir: TARGET_DIR,
     debugMode: DEBUG_MODE,
     question: QUESTION,
-    fullContext: FULL_CONTEXT,
     userMemory: USER_MEMORY,
     telemetry: TELEMETRY_SETTINGS,
     model: MODEL,
@@ -1182,7 +1481,10 @@ describe('BaseLlmClient Lifecycle', () => {
     const authType = AuthType.USE_GEMINI;
     const mockContentConfig = { model: 'gemini-flash', apiKey: 'test-key' };
 
-    vi.mocked(createContentGeneratorConfig).mockReturnValue(mockContentConfig);
+    vi.mocked(resolveContentGeneratorConfigWithSources).mockReturnValue({
+      config: mockContentConfig,
+      sources: {},
+    });
 
     await config.refreshAuth(authType);
 
@@ -1193,5 +1495,225 @@ describe('BaseLlmClient Lifecycle', () => {
       config.getContentGenerator(),
       config,
     );
+  });
+});
+
+describe('Model Switching and Config Updates', () => {
+  const baseParams: ConfigParameters = {
+    cwd: '/tmp',
+    targetDir: '/path/to/target',
+    debugMode: false,
+    model: 'qwen3-coder-plus',
+    usageStatisticsEnabled: false,
+    telemetry: { enabled: false },
+  };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('should update contextWindowSize when switching models with hot-update', async () => {
+    const config = new Config(baseParams);
+
+    // Initialize with first model
+    const initialConfig: ContentGeneratorConfig = {
+      ['model']: 'qwen3-coder-plus',
+      ['authType']: AuthType.QWEN_OAUTH,
+      ['apiKey']: 'test-key',
+      ['contextWindowSize']: 1_000_000,
+      ['samplingParams']: { temperature: 0.7 },
+      ['enableCacheControl']: true,
+    };
+
+    vi.mocked(resolveContentGeneratorConfigWithSources).mockReturnValue({
+      config: initialConfig,
+      sources: {
+        model: { kind: 'settings' },
+        contextWindowSize: { kind: 'computed', detail: 'auto' },
+      },
+    });
+
+    await config.refreshAuth(AuthType.QWEN_OAUTH);
+
+    // Verify initial config
+    const contentGenConfig = config.getContentGeneratorConfig();
+    expect(contentGenConfig['model']).toBe('qwen3-coder-plus');
+    expect(contentGenConfig['contextWindowSize']).toBe(1_000_000);
+
+    // Switch to a different model with different token limits
+    const newConfig: ContentGeneratorConfig = {
+      ['model']: 'qwen-max',
+      ['authType']: AuthType.QWEN_OAUTH,
+      ['apiKey']: 'test-key',
+      ['contextWindowSize']: 128_000,
+      ['samplingParams']: { temperature: 0.8 },
+      ['enableCacheControl']: false,
+    };
+
+    vi.mocked(resolveContentGeneratorConfigWithSources).mockReturnValue({
+      config: newConfig,
+      sources: {
+        model: { kind: 'programmatic', detail: 'user' },
+        contextWindowSize: { kind: 'computed', detail: 'auto' },
+        samplingParams: { kind: 'settings' },
+        enableCacheControl: { kind: 'settings' },
+      },
+    });
+
+    // Simulate model switch (this would be called by ModelsConfig.switchModel)
+    await (
+      config as unknown as {
+        handleModelChange: (
+          authType: AuthType,
+          requiresRefresh: boolean,
+        ) => Promise<void>;
+      }
+    ).handleModelChange(AuthType.QWEN_OAUTH, false);
+
+    // Verify all fields are updated
+    const updatedConfig = config.getContentGeneratorConfig();
+    expect(updatedConfig['model']).toBe('qwen-max');
+    expect(updatedConfig['contextWindowSize']).toBe(128_000);
+    expect(updatedConfig['samplingParams']?.temperature).toBe(0.8);
+    expect(updatedConfig['enableCacheControl']).toBe(false);
+
+    // Verify sources are also updated
+    const sources = config.getContentGeneratorConfigSources();
+    expect(sources['model']?.kind).toBe('programmatic');
+    expect(sources['model']?.detail).toBe('user');
+    expect(sources['contextWindowSize']?.kind).toBe('computed');
+    expect(sources['contextWindowSize']?.detail).toBe('auto');
+    expect(sources['samplingParams']?.kind).toBe('settings');
+    expect(sources['enableCacheControl']?.kind).toBe('settings');
+  });
+
+  it('should trigger full refresh when switching to non-qwen-oauth provider', async () => {
+    const config = new Config(baseParams);
+
+    // Initialize with qwen-oauth
+    const initialConfig: ContentGeneratorConfig = {
+      ['model']: 'qwen3-coder-plus',
+      ['authType']: AuthType.QWEN_OAUTH,
+      ['apiKey']: 'test-key',
+      ['contextWindowSize']: 1_000_000,
+    };
+
+    vi.mocked(resolveContentGeneratorConfigWithSources).mockReturnValue({
+      config: initialConfig,
+      sources: {},
+    });
+
+    await config.refreshAuth(AuthType.QWEN_OAUTH);
+
+    // Switch to different auth type (should trigger full refresh)
+    const newConfig: ContentGeneratorConfig = {
+      ['model']: 'gemini-flash',
+      ['authType']: AuthType.USE_GEMINI,
+      ['apiKey']: 'gemini-key',
+      ['contextWindowSize']: 32_000,
+    };
+
+    vi.mocked(resolveContentGeneratorConfigWithSources).mockReturnValue({
+      config: newConfig,
+      sources: {},
+    });
+
+    const refreshAuthSpy = vi.spyOn(
+      config as unknown as {
+        refreshAuth: (authType: AuthType) => Promise<void>;
+      },
+      'refreshAuth',
+    );
+
+    // Simulate model switch with different auth type
+    await (
+      config as unknown as {
+        handleModelChange: (
+          authType: AuthType,
+          requiresRefresh: boolean,
+        ) => Promise<void>;
+      }
+    ).handleModelChange(AuthType.USE_GEMINI, true);
+
+    // Verify refreshAuth was called (full refresh path)
+    expect(refreshAuthSpy).toHaveBeenCalledWith(AuthType.USE_GEMINI);
+  });
+
+  it('should handle model switch when contextWindowSize is undefined', async () => {
+    const config = new Config(baseParams);
+
+    // Initialize with config that has undefined token limits
+    const initialConfig: ContentGeneratorConfig = {
+      ['model']: 'qwen3-coder-plus',
+      ['authType']: AuthType.QWEN_OAUTH,
+      ['apiKey']: 'test-key',
+      ['contextWindowSize']: undefined,
+    };
+
+    vi.mocked(resolveContentGeneratorConfigWithSources).mockReturnValue({
+      config: initialConfig,
+      sources: {},
+    });
+
+    await config.refreshAuth(AuthType.QWEN_OAUTH);
+
+    // Switch to model with defined limits
+    const newConfig: ContentGeneratorConfig = {
+      ['model']: 'qwen-max',
+      ['authType']: AuthType.QWEN_OAUTH,
+      ['apiKey']: 'test-key',
+      ['contextWindowSize']: 128_000,
+    };
+
+    vi.mocked(resolveContentGeneratorConfigWithSources).mockReturnValue({
+      config: newConfig,
+      sources: {},
+    });
+
+    await (
+      config as unknown as {
+        handleModelChange: (
+          authType: AuthType,
+          requiresRefresh: boolean,
+        ) => Promise<void>;
+      }
+    ).handleModelChange(AuthType.QWEN_OAUTH, false);
+
+    // Verify limits are now defined
+    const updatedConfig = config.getContentGeneratorConfig();
+    expect(updatedConfig['contextWindowSize']).toBe(128_000);
+  });
+
+  describe('hasHooksForEvent', () => {
+    it('should return false when hookSystem is not initialized', () => {
+      const config = new Config(baseParams);
+      expect(config.hasHooksForEvent('Stop')).toBe(false);
+    });
+
+    it('should delegate to hookSystem.hasHooksForEvent when hookSystem exists', () => {
+      const config = new Config(baseParams);
+      const mockHasHooksForEvent = vi.fn().mockReturnValue(true);
+      const mockHookSystem = {
+        hasHooksForEvent: mockHasHooksForEvent,
+      };
+      // @ts-expect-error - accessing private for testing
+      config['hookSystem'] = mockHookSystem;
+
+      expect(config.hasHooksForEvent('UserPromptSubmit')).toBe(true);
+      expect(mockHasHooksForEvent).toHaveBeenCalledWith('UserPromptSubmit');
+    });
+
+    it('should return false when hookSystem has no hooks for the event', () => {
+      const config = new Config(baseParams);
+      const mockHasHooksForEvent = vi.fn().mockReturnValue(false);
+      const mockHookSystem = {
+        hasHooksForEvent: mockHasHooksForEvent,
+      };
+      // @ts-expect-error - accessing private for testing
+      config['hookSystem'] = mockHookSystem;
+
+      expect(config.hasHooksForEvent('Stop')).toBe(false);
+      expect(mockHasHooksForEvent).toHaveBeenCalledWith('Stop');
+    });
   });
 });

@@ -5,6 +5,7 @@
  */
 
 import process from 'node:process';
+import { createDebugLogger } from '@qwen-code/qwen-code-core';
 
 export enum AttentionNotificationReason {
   ToolApproval = 'tool_approval',
@@ -13,9 +14,11 @@ export enum AttentionNotificationReason {
 
 export interface TerminalNotificationOptions {
   stream?: Pick<NodeJS.WriteStream, 'write' | 'isTTY'>;
+  enabled?: boolean;
 }
 
 const TERMINAL_BELL = '\u0007';
+const debugLogger = createDebugLogger('ATTENTION_NOTIFICATION');
 
 /**
  * Grabs the user's attention by emitting the terminal bell character.
@@ -28,6 +31,11 @@ export function notifyTerminalAttention(
   _reason: AttentionNotificationReason,
   options: TerminalNotificationOptions = {},
 ): boolean {
+  // Check if terminal bell is enabled (default true for backwards compatibility)
+  if (options.enabled === false) {
+    return false;
+  }
+
   const stream = options.stream ?? process.stdout;
   if (!stream?.write || stream.isTTY === false) {
     return false;
@@ -37,7 +45,7 @@ export function notifyTerminalAttention(
     stream.write(TERMINAL_BELL);
     return true;
   } catch (error) {
-    console.warn('Failed to send terminal bell:', error);
+    debugLogger.warn('Failed to send terminal bell:', error);
     return false;
   }
 }

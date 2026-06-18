@@ -4,13 +4,14 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import type { ToolEditConfirmationDetails, ToolResult } from './tools.js';
-import {
-  BaseDeclarativeTool,
-  BaseToolInvocation,
-  Kind,
+import type {
+  ToolEditConfirmationDetails,
+  ToolResult,
+  ToolCallConfirmationDetails,
   ToolConfirmationOutcome,
 } from './tools.js';
+import type { PermissionDecision } from '../permissions/types.js';
+import { BaseDeclarativeTool, BaseToolInvocation, Kind } from './tools.js';
 import type { FunctionDeclaration } from '@google/genai';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
@@ -24,6 +25,9 @@ import type {
   ModifyContext,
 } from './modifiable-tool.js';
 import { ToolErrorType } from './tool-error.js';
+import { createDebugLogger } from '../utils/debugLogger.js';
+
+const debugLogger = createDebugLogger('MEMORY_TOOL');
 
 const memoryToolSchemaData: FunctionDeclaration = {
   name: 'save_memory',
@@ -73,11 +77,16 @@ Do NOT use this tool:
 
 export const QWEN_CONFIG_DIR = '.qwen';
 export const DEFAULT_CONTEXT_FILENAME = 'QWEN.md';
+export const AGENT_CONTEXT_FILENAME = 'AGENTS.md';
 export const MEMORY_SECTION_HEADER = '## Qwen Added Memories';
 
-// This variable will hold the currently configured filename for QWEN.md context files.
-// It defaults to DEFAULT_CONTEXT_FILENAME but can be overridden by setGeminiMdFilename.
-let currentGeminiMdFilename: string | string[] = DEFAULT_CONTEXT_FILENAME;
+// This variable will hold the currently configured filename for context files.
+// It defaults to include both QWEN.md and AGENTS.md but can be overridden by setGeminiMdFilename.
+// QWEN.md is first to maintain backward compatibility (used by /init command and save_memory tool).
+let currentGeminiMdFilename: string | string[] = [
+  DEFAULT_CONTEXT_FILENAME,
+  AGENT_CONTEXT_FILENAME,
+];
 
 export function setGeminiMdFilename(newFilename: string | string[]): void {
   if (Array.isArray(newFilename)) {
@@ -199,8 +208,6 @@ class MemoryToolInvocation extends BaseToolInvocation<
   SaveMemoryParams,
   ToolResult
 > {
-  private static readonly allowlist: Set<string> = new Set();
-
   getDescription(): string {
     if (!this.params.scope) {
       const globalPath = tildeifyPath(getMemoryFilePath('global'));
@@ -212,12 +219,21 @@ class MemoryToolInvocation extends BaseToolInvocation<
     return `${tildeifyPath(memoryFilePath)} (${scope})`;
   }
 
-  override async shouldConfirmExecute(
+  /**
+   * Memory save always needs user confirmation.
+   */
+  override async getDefaultPermission(): Promise<PermissionDecision> {
+    return 'ask';
+  }
+
+  /**
+   * Constructs the memory save confirmation dialog.
+   */
+  override async getConfirmationDetails(
     _abortSignal: AbortSignal,
-  ): Promise<ToolEditConfirmationDetails | false> {
+  ): Promise<ToolCallConfirmationDetails> {
     // When scope is not specified, show a choice dialog defaulting to global
     if (!this.params.scope) {
-      // Show preview of what would be added to global by default
       const defaultScope = 'global';
       const currentContent = await readMemoryFileContent(defaultScope);
       const newContent = computeNewContent(currentContent, this.params.fact);
@@ -262,14 +278,9 @@ Preview of changes to be made to GLOBAL memory:
       return confirmationDetails;
     }
 
-    // Only check allowlist when scope is specified
+    // Scope is specified
     const scope = this.params.scope;
     const memoryFilePath = getMemoryFilePath(scope);
-    const allowlistKey = `${memoryFilePath}_${scope}`;
-
-    if (MemoryToolInvocation.allowlist.has(allowlistKey)) {
-      return false;
-    }
 
     // Read current content of the memory file
     const currentContent = await readMemoryFileContent(scope);
@@ -295,10 +306,8 @@ Preview of changes to be made to GLOBAL memory:
       fileDiff,
       originalContent: currentContent,
       newContent,
-      onConfirm: async (outcome: ToolConfirmationOutcome) => {
-        if (outcome === ToolConfirmationOutcome.ProceedAlways) {
-          MemoryToolInvocation.allowlist.add(allowlistKey);
-        }
+      onConfirm: async (_outcome: ToolConfirmationOutcome) => {
+        // No-op: persistence is handled by coreToolScheduler via PM rules
       },
     };
     return confirmationDetails;
@@ -361,7 +370,7 @@ Project: ${projectPath} (current project only)`;
     } catch (error) {
       const errorMessage =
         error instanceof Error ? error.message : String(error);
-      console.error(
+      debugLogger.error(
         `[MemoryTool] Error executing save_memory for fact "${fact}" in ${scope}: ${errorMessage}`,
       );
 
@@ -435,7 +444,7 @@ export class MemoryTool
 
       await fsAdapter.writeFile(memoryFilePath, newContent, 'utf-8');
     } catch (error) {
-      console.error(
+      debugLogger.error(
         `[MemoryTool] Error adding memory entry to ${memoryFilePath}:`,
         error,
       );
@@ -510,7 +519,7 @@ export class MemoryTool
         );
         const scope = scopeMatch
           ? (scopeMatch[1].toLowerCase() as 'global' | 'project')
-          : 'global';
+          : originalParams.scope || 'global';
 
         // Strip out the scope directive and instruction lines, keep only the actual memory content
         const contentWithoutScope = modifiedProposedContent.replace(

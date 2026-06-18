@@ -5,9 +5,7 @@
  */
 
 import { convert } from 'html-to-text';
-import { ProxyAgent, setGlobalDispatcher } from 'undici';
 import type { Config } from '../config/config.js';
-import { ApprovalMode } from '../config/config.js';
 import { fetchWithTimeout, isPrivateIp } from '../utils/fetch.js';
 import { getResponseText } from '../utils/partUtils.js';
 import { ToolErrorType } from './tool-error.js';
@@ -15,15 +13,14 @@ import type {
   ToolCallConfirmationDetails,
   ToolInvocation,
   ToolResult,
-} from './tools.js';
-import {
-  BaseDeclarativeTool,
-  BaseToolInvocation,
-  Kind,
+  ToolConfirmationPayload,
   ToolConfirmationOutcome,
 } from './tools.js';
+import type { PermissionDecision } from '../permissions/types.js';
+import { BaseDeclarativeTool, BaseToolInvocation, Kind } from './tools.js';
 import { DEFAULT_QWEN_MODEL } from '../config/models.js';
 import { ToolNames, ToolDisplayNames } from './tool-names.js';
+import { createDebugLogger, type DebugLogger } from '../utils/debugLogger.js';
 
 const URL_FETCH_TIMEOUT_MS = 10000;
 const MAX_CONTENT_LENGTH = 100000;
@@ -49,11 +46,14 @@ class WebFetchToolInvocation extends BaseToolInvocation<
   WebFetchToolParams,
   ToolResult
 > {
+  private readonly debugLogger: DebugLogger;
+
   constructor(
     private readonly config: Config,
     params: WebFetchToolParams,
   ) {
     super(params);
+    this.debugLogger = createDebugLogger('WEB_FETCH');
   }
 
   private async executeDirectFetch(signal: AbortSignal): Promise<ToolResult> {
@@ -64,22 +64,24 @@ class WebFetchToolInvocation extends BaseToolInvocation<
       url = url
         .replace('github.com', 'raw.githubusercontent.com')
         .replace('/blob/', '/');
-      console.debug(
+      this.debugLogger.debug(
         `[WebFetchTool] Converted GitHub blob URL to raw URL: ${url}`,
       );
     }
 
     try {
-      console.debug(`[WebFetchTool] Fetching content from: ${url}`);
+      this.debugLogger.debug(`[WebFetchTool] Fetching content from: ${url}`);
       const response = await fetchWithTimeout(url, URL_FETCH_TIMEOUT_MS);
 
       if (!response.ok) {
         const errorMessage = `Request failed with status code ${response.status} ${response.statusText}`;
-        console.error(`[WebFetchTool] ${errorMessage}`);
+        this.debugLogger.error(`[WebFetchTool] ${errorMessage}`);
         throw new Error(errorMessage);
       }
 
-      console.debug(`[WebFetchTool] Successfully fetched content from ${url}`);
+      this.debugLogger.debug(
+        `[WebFetchTool] Successfully fetched content from ${url}`,
+      );
       const html = await response.text();
       const textContent = convert(html, {
         wordwrap: false,
@@ -89,7 +91,7 @@ class WebFetchToolInvocation extends BaseToolInvocation<
         ],
       }).substring(0, MAX_CONTENT_LENGTH);
 
-      console.debug(
+      this.debugLogger.debug(
         `[WebFetchTool] Converted HTML to text (${textContent.length} characters)`,
       );
 
@@ -102,19 +104,23 @@ I have fetched the content from ${this.params.url}. Please use the following con
 ${textContent}
 ---`;
 
-      console.debug(
+      this.debugLogger.debug(
         `[WebFetchTool] Processing content with prompt: "${this.params.prompt}"`,
       );
 
       const result = await geminiClient.generateContent(
         [{ role: 'user', parts: [{ text: fallbackPrompt }] }],
-        {},
+        {
+          systemInstruction:
+            'Extract and summarize the requested information from the provided web content. ' +
+            'Be concise and accurate. Respond only with the requested information.',
+        },
         signal,
         this.config.getModel() || DEFAULT_QWEN_MODEL,
       );
       const resultText = getResponseText(result) || '';
 
-      console.debug(
+      this.debugLogger.debug(
         `[WebFetchTool] Successfully processed content from ${this.params.url}`,
       );
 
@@ -125,7 +131,7 @@ ${textContent}
     } catch (e) {
       const error = e as Error;
       const errorMessage = `Error during fetch for ${url}: ${error.message}`;
-      console.error(`[WebFetchTool] ${errorMessage}`, error);
+      this.debugLogger.error(`[WebFetchTool] ${errorMessage}`, error);
       return {
         llmContent: `Error: ${errorMessage}`,
         returnDisplay: `Error: ${errorMessage}`,
@@ -145,22 +151,40 @@ ${textContent}
     return `Fetching content from ${this.params.url} and processing with prompt: "${displayPrompt}"`;
   }
 
-  override async shouldConfirmExecute(): Promise<
-    ToolCallConfirmationDetails | false
-  > {
-    if (this.config.getApprovalMode() === ApprovalMode.AUTO_EDIT) {
-      return false;
+  /**
+   * WebFetch is a read-like tool (fetches content) but requires confirmation
+   * because it makes external network requests.
+   */
+  override async getDefaultPermission(): Promise<PermissionDecision> {
+    return 'ask';
+  }
+
+  /**
+   * Constructs the web fetch confirmation details.
+   */
+  override async getConfirmationDetails(
+    _abortSignal: AbortSignal,
+  ): Promise<ToolCallConfirmationDetails> {
+    // Extract the domain for the permission rule.
+    let domain: string;
+    try {
+      domain = new URL(this.params.url).hostname;
+    } catch {
+      domain = this.params.url;
     }
+    const permissionRules = [`WebFetch(${domain})`];
 
     const confirmationDetails: ToolCallConfirmationDetails = {
       type: 'info',
       title: `Confirm Web Fetch`,
       prompt: `Fetch content from ${this.params.url} and process with: ${this.params.prompt}`,
       urls: [this.params.url],
-      onConfirm: async (outcome: ToolConfirmationOutcome) => {
-        if (outcome === ToolConfirmationOutcome.ProceedAlways) {
-          this.config.setApprovalMode(ApprovalMode.AUTO_EDIT);
-        }
+      permissionRules,
+      onConfirm: async (
+        _outcome: ToolConfirmationOutcome,
+        _payload?: ToolConfirmationPayload,
+      ) => {
+        // No-op: persistence is handled by coreToolScheduler via PM rules
       },
     };
     return confirmationDetails;
@@ -171,11 +195,11 @@ ${textContent}
     const isPrivate = isPrivateIp(this.params.url);
 
     if (isPrivate) {
-      console.debug(
+      this.debugLogger.debug(
         `[WebFetchTool] Private IP detected for ${this.params.url}, using direct fetch`,
       );
     } else {
-      console.debug(
+      this.debugLogger.debug(
         `[WebFetchTool] Public URL detected for ${this.params.url}, using direct fetch`,
       );
     }
@@ -214,10 +238,6 @@ export class WebFetchTool extends BaseDeclarativeTool<
         type: 'object',
       },
     );
-    const proxy = config.getProxy();
-    if (proxy) {
-      setGlobalDispatcher(new ProxyAgent(proxy as string));
-    }
   }
 
   protected override validateToolParamValues(

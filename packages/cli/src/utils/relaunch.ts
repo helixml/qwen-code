@@ -6,6 +6,7 @@
 
 import { spawn } from 'node:child_process';
 import { RELAUNCH_EXIT_CODE } from './processUtils.js';
+import { writeStderrLine } from './stdioHelpers.js';
 
 export async function relaunchOnExitCode(runner: () => Promise<number>) {
   while (true) {
@@ -17,7 +18,8 @@ export async function relaunchOnExitCode(runner: () => Promise<number>) {
       }
     } catch (error) {
       process.stdin.resume();
-      console.error('Fatal error: Failed to relaunch the CLI process.', error);
+      writeStderrLine('Fatal error: Failed to relaunch the CLI process.');
+      writeStderrLine(error instanceof Error ? error.message : String(error));
       process.exit(1);
     }
   }
@@ -27,7 +29,7 @@ export async function relaunchAppInChildProcess(
   additionalNodeArgs: string[],
   additionalScriptArgs: string[],
 ) {
-  if (process.env['GEMINI_CLI_NO_RELAUNCH']) {
+  if (process.env['QWEN_CODE_NO_RELAUNCH']) {
     return;
   }
 
@@ -44,7 +46,7 @@ export async function relaunchAppInChildProcess(
       ...additionalScriptArgs,
       ...scriptArgs,
     ];
-    const newEnv = { ...process.env, GEMINI_CLI_NO_RELAUNCH: 'true' };
+    const newEnv = { ...process.env, QWEN_CODE_NO_RELAUNCH: 'true' };
 
     // The parent process should not be reading from stdin while the child is running.
     process.stdin.pause();

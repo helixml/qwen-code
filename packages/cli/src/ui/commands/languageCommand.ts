@@ -1,6 +1,6 @@
 /**
  * @license
- * Copyright 2025 Google LLC
+ * Copyright 2025 Qwen team
  * SPDX-License-Identifier: Apache-2.0
  */
 
@@ -18,90 +18,74 @@ import {
   type SupportedLanguage,
   t,
 } from '../../i18n/index.js';
-import * as fs from 'node:fs';
-import * as path from 'node:path';
-import { Storage } from '@qwen-code/qwen-code-core';
+import {
+  SUPPORTED_LANGUAGES,
+  getSupportedLanguageIds,
+} from '../../i18n/languages.js';
+import {
+  OUTPUT_LANGUAGE_AUTO,
+  isAutoLanguage,
+  resolveOutputLanguage,
+  updateOutputLanguageFile,
+} from '../../utils/languageUtils.js';
+import { createDebugLogger } from '@qwen-code/qwen-code-core';
 
-const LLM_OUTPUT_LANGUAGE_RULE_FILENAME = 'output-language.md';
+const debugLogger = createDebugLogger('LANGUAGE_COMMAND');
 
 /**
- * Generates the LLM output language rule template based on the language name.
+ * Gets the current LLM output language setting and its resolved value.
+ * Returns an object with both the raw setting and the resolved language.
  */
-function generateLlmOutputLanguageRule(language: string): string {
-  return `# ⚠️ CRITICAL: ${language} Output Language Rule - HIGHEST PRIORITY ⚠️
-
-## 🚨 MANDATORY RULE - NO EXCEPTIONS 🚨
-
-**YOU MUST RESPOND IN ${language.toUpperCase()} FOR EVERY SINGLE OUTPUT, REGARDLESS OF THE USER'S INPUT LANGUAGE.**
-
-This is a **NON-NEGOTIABLE** requirement. Even if the user writes in English, says "hi", asks a simple question, or explicitly requests another language, **YOU MUST ALWAYS RESPOND IN ${language.toUpperCase()}.**
-
-## What Must Be in ${language}
-
-**EVERYTHING** you output: conversation replies, tool call descriptions, success/error messages, generated file content (comments, documentation), and all explanatory text.
-
-**Tool outputs**: All descriptive text from \`read_file\`, \`write_file\`, \`codebase_search\`, \`run_terminal_cmd\`, \`todo_write\`, \`web_search\`, etc. MUST be in ${language}.
-
-## Examples
-
-### ✅ CORRECT:
-- User says "hi" → Respond in ${language} (e.g., "Bonjour" if ${language} is French)
-- Tool result → "已成功读取文件 config.json" (if ${language} is Chinese)
-- Error → "无法找到指定的文件" (if ${language} is Chinese)
-
-### ❌ WRONG:
-- User says "hi" → "Hello" in English
-- Tool result → "Successfully read file" in English
-- Error → "File not found" in English
-
-## Notes
-
-- Code elements (variable/function names, syntax) can remain in English
-- Comments, documentation, and all other text MUST be in ${language}
-
-**THIS RULE IS ACTIVE NOW. ALL OUTPUTS MUST BE IN ${language.toUpperCase()}. NO EXCEPTIONS.**
-`;
+function getCurrentOutputLanguage(context?: CommandContext): {
+  setting: string;
+  resolved: string;
+} {
+  const settingValue =
+    context?.services?.settings?.merged?.general?.outputLanguage ||
+    OUTPUT_LANGUAGE_AUTO;
+  const resolved = resolveOutputLanguage(settingValue);
+  return { setting: settingValue, resolved };
 }
 
 /**
- * Gets the path to the LLM output language rule file.
+ * Parses user input to find a matching supported UI language.
+ * Accepts locale codes (e.g., "zh"), IDs (e.g., "zh-CN"), or full names (e.g., "Chinese").
  */
-function getLlmOutputLanguageRulePath(): string {
-  return path.join(
-    Storage.getGlobalQwenDir(),
-    LLM_OUTPUT_LANGUAGE_RULE_FILENAME,
-  );
-}
+function parseUiLanguageArg(input: string): SupportedLanguage | null {
+  const lowered = input.trim().toLowerCase();
+  if (!lowered) return null;
 
-/**
- * Gets the current LLM output language from the rule file if it exists.
- */
-function getCurrentLlmOutputLanguage(): string | null {
-  const filePath = getLlmOutputLanguageRulePath();
-  if (fs.existsSync(filePath)) {
-    try {
-      const content = fs.readFileSync(filePath, 'utf-8');
-      // Extract language name from the first line (e.g., "# Chinese Response Rules" -> "Chinese")
-      const match = content.match(/^#\s+(.+?)\s+Response Rules/i);
-      if (match) {
-        return match[1];
-      }
-    } catch {
-      // Ignore errors
+  for (const lang of SUPPORTED_LANGUAGES) {
+    if (
+      lowered === lang.code ||
+      lowered === lang.id.toLowerCase() ||
+      lowered === lang.fullName.toLowerCase()
+    ) {
+      return lang.code;
     }
   }
   return null;
 }
 
 /**
- * Sets the UI language and persists it to settings.
+ * Formats a UI language code for display (e.g., "zh" -> "中文 (Chinese) [zh-CN]").
+ */
+function formatUiLanguageDisplay(lang: SupportedLanguage): string {
+  const option = SUPPORTED_LANGUAGES.find((o) => o.code === lang);
+  if (!option) return lang;
+  return option.nativeName && option.nativeName !== option.fullName
+    ? `${option.nativeName} (${option.fullName}) [${option.id}]`
+    : `${option.fullName} [${option.id}]`;
+}
+
+/**
+ * Sets the UI language and persists it to user settings.
  */
 async function setUiLanguage(
   context: CommandContext,
   lang: SupportedLanguage,
 ): Promise<MessageActionReturn> {
   const { services } = context;
-  const { settings } = services;
 
   if (!services.config) {
     return {
@@ -111,66 +95,76 @@ async function setUiLanguage(
     };
   }
 
-  // Set language in i18n system (async to support JS translation files)
+  // Update i18n system
   await setLanguageAsync(lang);
 
-  // Persist to settings (user scope)
-  if (settings && typeof settings.setValue === 'function') {
+  // Persist to settings
+  if (services.settings?.setValue) {
     try {
-      settings.setValue(SettingScope.User, 'general.language', lang);
+      services.settings.setValue(SettingScope.User, 'general.language', lang);
     } catch (error) {
-      console.warn('Failed to save language setting:', error);
+      debugLogger.warn('Failed to save language setting:', error);
     }
   }
 
-  // Reload commands to update their descriptions with the new language
+  // Reload commands to update localized descriptions
   context.ui.reloadCommands();
-
-  // Map language codes to friendly display names
-  const langDisplayNames: Record<SupportedLanguage, string> = {
-    zh: '中文（zh-CN）',
-    en: 'English（en-US）',
-  };
 
   return {
     type: 'message',
     messageType: 'info',
     content: t('UI language changed to {{lang}}', {
-      lang: langDisplayNames[lang],
+      lang: formatUiLanguageDisplay(lang),
     }),
   };
 }
 
 /**
- * Generates the LLM output language rule file.
+ * Handles the /language output command, updating both the setting and the rule file.
+ * 'auto' is preserved in settings but resolved to the detected language for the rule file.
  */
-function generateLlmOutputLanguageRuleFile(
+async function setOutputLanguage(
+  context: CommandContext,
   language: string,
 ): Promise<MessageActionReturn> {
   try {
-    const filePath = getLlmOutputLanguageRulePath();
-    const content = generateLlmOutputLanguageRule(language);
+    const isAuto = isAutoLanguage(language);
+    const resolved = resolveOutputLanguage(language);
+    // Save 'auto' as-is to settings, or normalize other values
+    const settingValue = isAuto ? OUTPUT_LANGUAGE_AUTO : resolved;
 
-    // Ensure directory exists
-    const dir = path.dirname(filePath);
-    fs.mkdirSync(dir, { recursive: true });
+    // Update the rule file with the resolved language
+    updateOutputLanguageFile(settingValue);
 
-    // Write file (overwrite if exists)
-    fs.writeFileSync(filePath, content, 'utf-8');
+    // Save to settings
+    if (context.services.settings?.setValue) {
+      try {
+        context.services.settings.setValue(
+          SettingScope.User,
+          'general.outputLanguage',
+          settingValue,
+        );
+      } catch (error) {
+        debugLogger.warn('Failed to save output language setting:', error);
+      }
+    }
 
-    return Promise.resolve({
+    // Format display message
+    const displayLang = isAuto
+      ? `${t('Auto (detect from system)')} → ${resolved}`
+      : resolved;
+
+    return {
       type: 'message',
       messageType: 'info',
       content: [
-        t('LLM output language rule file generated at {{path}}', {
-          path: filePath,
-        }),
+        t('LLM output language set to {{lang}}', { lang: displayLang }),
         '',
         t('Please restart the application for the changes to take effect.'),
       ].join('\n'),
-    });
+    };
   } catch (error) {
-    return Promise.resolve({
+    return {
       type: 'message',
       messageType: 'error',
       content: t(
@@ -179,7 +173,7 @@ function generateLlmOutputLanguageRuleFile(
           error: error instanceof Error ? error.message : String(error),
         },
       ),
-    });
+    };
   }
 }
 
@@ -189,13 +183,12 @@ export const languageCommand: SlashCommand = {
     return t('View or change the language setting');
   },
   kind: CommandKind.BUILT_IN,
+
   action: async (
     context: CommandContext,
     args: string,
   ): Promise<SlashCommandActionReturn> => {
-    const { services } = context;
-
-    if (!services.config) {
+    if (!context.services.config) {
       return {
         type: 'message',
         messageType: 'error',
@@ -205,135 +198,83 @@ export const languageCommand: SlashCommand = {
 
     const trimmedArgs = args.trim();
 
-    // If no arguments, show current language settings and usage
-    if (!trimmedArgs) {
-      const currentUiLang = getCurrentLanguage();
-      const currentLlmLang = getCurrentLlmOutputLanguage();
-      const message = [
-        t('Current UI language: {{lang}}', { lang: currentUiLang }),
-        currentLlmLang
-          ? t('Current LLM output language: {{lang}}', { lang: currentLlmLang })
-          : t('LLM output language not set'),
-        '',
-        t('Available subcommands:'),
-        `  /language ui [zh-CN|en-US] - ${t('Set UI language')}`,
-        `  /language output <language> - ${t('Set LLM output language')}`,
-      ].join('\n');
+    // Route to subcommands if specified
+    if (trimmedArgs) {
+      const [firstArg, ...rest] = trimmedArgs.split(/\s+/);
+      const subCommandName = firstArg.toLowerCase();
+      const subArgs = rest.join(' ');
 
+      if (subCommandName === 'ui' || subCommandName === 'output') {
+        const subCommand = languageCommand.subCommands?.find(
+          (s) => s.name === subCommandName,
+        );
+        if (subCommand?.action) {
+          return subCommand.action(
+            context,
+            subArgs,
+          ) as Promise<SlashCommandActionReturn>;
+        }
+      }
+
+      // Backward compatibility: direct language code (e.g., /language zh)
+      const targetLang = parseUiLanguageArg(trimmedArgs);
+      if (targetLang) {
+        return setUiLanguage(context, targetLang);
+      }
+
+      // Unknown argument
       return {
         type: 'message',
-        messageType: 'info',
-        content: message,
+        messageType: 'error',
+        content: [
+          t('Invalid command. Available subcommands:'),
+          `  - /language ui [${getSupportedLanguageIds()}] - ${t('Set UI language')}`,
+          `  - /language output <language> - ${t('Set LLM output language')}`,
+        ].join('\n'),
       };
     }
 
-    // Parse subcommand
-    const parts = trimmedArgs.split(/\s+/);
-    const subcommand = parts[0].toLowerCase();
+    // No arguments: show current status
+    const currentUiLang = getCurrentLanguage();
+    const { setting: outputSetting, resolved: outputResolved } =
+      getCurrentOutputLanguage(context);
 
-    if (subcommand === 'ui') {
-      // Handle /language ui [zh-CN|en-US]
-      if (parts.length === 1) {
-        // Show UI language subcommand help
-        return {
-          type: 'message',
-          messageType: 'info',
-          content: [
-            t('Set UI language'),
-            '',
-            t('Usage: /language ui [zh-CN|en-US]'),
-            '',
-            t('Available options:'),
-            t('  - zh-CN: Simplified Chinese'),
-            t('  - en-US: English'),
-            '',
-            t(
-              'To request additional UI language packs, please open an issue on GitHub.',
-            ),
-          ].join('\n'),
-        };
-      }
+    // Format output language display: show "Auto → English" or just "English"
+    const outputLangDisplay = isAutoLanguage(outputSetting)
+      ? `${t('Auto (detect from system)')} → ${outputResolved}`
+      : outputResolved;
 
-      const langArg = parts[1].toLowerCase();
-      let targetLang: SupportedLanguage | null = null;
-
-      if (langArg === 'en' || langArg === 'english' || langArg === 'en-us') {
-        targetLang = 'en';
-      } else if (
-        langArg === 'zh' ||
-        langArg === 'chinese' ||
-        langArg === '中文' ||
-        langArg === 'zh-cn'
-      ) {
-        targetLang = 'zh';
-      } else {
-        return {
-          type: 'message',
-          messageType: 'error',
-          content: t('Invalid language. Available: en-US, zh-CN'),
-        };
-      }
-
-      return setUiLanguage(context, targetLang);
-    } else if (subcommand === 'output') {
-      // Handle /language output <language>
-      if (parts.length === 1) {
-        return {
-          type: 'message',
-          messageType: 'info',
-          content: [
-            t('Set LLM output language'),
-            '',
-            t('Usage: /language output <language>'),
-            `  ${t('Example: /language output 中文')}`,
-          ].join('\n'),
-        };
-      }
-
-      // Join all parts after "output" as the language name
-      const language = parts.slice(1).join(' ');
-      return generateLlmOutputLanguageRuleFile(language);
-    } else {
-      // Backward compatibility: treat as UI language
-      const langArg = trimmedArgs.toLowerCase();
-      let targetLang: SupportedLanguage | null = null;
-
-      if (langArg === 'en' || langArg === 'english' || langArg === 'en-us') {
-        targetLang = 'en';
-      } else if (
-        langArg === 'zh' ||
-        langArg === 'chinese' ||
-        langArg === '中文' ||
-        langArg === 'zh-cn'
-      ) {
-        targetLang = 'zh';
-      } else {
-        return {
-          type: 'message',
-          messageType: 'error',
-          content: [
-            t('Invalid command. Available subcommands:'),
-            '  - /language ui [zh-CN|en-US] - ' + t('Set UI language'),
-            '  - /language output <language> - ' + t('Set LLM output language'),
-          ].join('\n'),
-        };
-      }
-
-      return setUiLanguage(context, targetLang);
-    }
+    return {
+      type: 'message',
+      messageType: 'info',
+      content: [
+        t('Current UI language: {{lang}}', {
+          lang: formatUiLanguageDisplay(currentUiLang as SupportedLanguage),
+        }),
+        t('Current LLM output language: {{lang}}', { lang: outputLangDisplay }),
+        '',
+        t('Available subcommands:'),
+        `  /language ui [${getSupportedLanguageIds()}] - ${t('Set UI language')}`,
+        `  /language output <language> - ${t('Set LLM output language')}`,
+      ].join('\n'),
+    };
   },
+
   subCommands: [
+    // /language ui subcommand
     {
       name: 'ui',
       get description() {
         return t('Set UI language');
       },
       kind: CommandKind.BUILT_IN,
+
       action: async (
         context: CommandContext,
         args: string,
       ): Promise<MessageActionReturn> => {
         const trimmedArgs = args.trim();
+
         if (!trimmedArgs) {
           return {
             type: 'message',
@@ -341,11 +282,14 @@ export const languageCommand: SlashCommand = {
             content: [
               t('Set UI language'),
               '',
-              t('Usage: /language ui [zh-CN|en-US]'),
+              t('Usage: /language ui [{{options}}]', {
+                options: getSupportedLanguageIds(),
+              }),
               '',
               t('Available options:'),
-              t('  - zh-CN: Simplified Chinese'),
-              t('  - en-US: English'),
+              ...SUPPORTED_LANGUAGES.map(
+                (o) => `  - ${o.id}: ${o.nativeName || o.fullName}`,
+              ),
               '',
               t(
                 'To request additional UI language packs, please open an issue on GitHub.',
@@ -354,41 +298,32 @@ export const languageCommand: SlashCommand = {
           };
         }
 
-        const langArg = trimmedArgs.toLowerCase();
-        let targetLang: SupportedLanguage | null = null;
-
-        if (langArg === 'en' || langArg === 'english' || langArg === 'en-us') {
-          targetLang = 'en';
-        } else if (
-          langArg === 'zh' ||
-          langArg === 'chinese' ||
-          langArg === '中文' ||
-          langArg === 'zh-cn'
-        ) {
-          targetLang = 'zh';
-        } else {
+        const targetLang = parseUiLanguageArg(trimmedArgs);
+        if (!targetLang) {
           return {
             type: 'message',
             messageType: 'error',
-            content: t('Invalid language. Available: en-US, zh-CN'),
+            content: t('Invalid language. Available: {{options}}', {
+              options: getSupportedLanguageIds(','),
+            }),
           };
         }
 
         return setUiLanguage(context, targetLang);
       },
-      subCommands: [
-        {
-          name: 'zh-CN',
-          altNames: ['zh', 'chinese', '中文'],
+
+      // Nested subcommands for each supported language (e.g., /language ui zh-CN)
+      subCommands: SUPPORTED_LANGUAGES.map(
+        (lang): SlashCommand => ({
+          name: lang.id,
           get description() {
-            return t('Set UI language to Simplified Chinese (zh-CN)');
+            return t('Set UI language to {{name}}', {
+              name: lang.nativeName || lang.fullName,
+            });
           },
           kind: CommandKind.BUILT_IN,
-          action: async (
-            context: CommandContext,
-            args: string,
-          ): Promise<MessageActionReturn> => {
-            if (args.trim().length > 0) {
+          action: async (context, args) => {
+            if (args.trim()) {
               return {
                 type: 'message',
                 messageType: 'error',
@@ -397,45 +332,26 @@ export const languageCommand: SlashCommand = {
                 ),
               };
             }
-            return setUiLanguage(context, 'zh');
+            return setUiLanguage(context, lang.code);
           },
-        },
-        {
-          name: 'en-US',
-          altNames: ['en', 'english'],
-          get description() {
-            return t('Set UI language to English (en-US)');
-          },
-          kind: CommandKind.BUILT_IN,
-          action: async (
-            context: CommandContext,
-            args: string,
-          ): Promise<MessageActionReturn> => {
-            if (args.trim().length > 0) {
-              return {
-                type: 'message',
-                messageType: 'error',
-                content: t(
-                  'Language subcommands do not accept additional arguments.',
-                ),
-              };
-            }
-            return setUiLanguage(context, 'en');
-          },
-        },
-      ],
+        }),
+      ),
     },
+
+    // /language output subcommand
     {
       name: 'output',
       get description() {
         return t('Set LLM output language');
       },
       kind: CommandKind.BUILT_IN,
+
       action: async (
         context: CommandContext,
         args: string,
       ): Promise<MessageActionReturn> => {
         const trimmedArgs = args.trim();
+
         if (!trimmedArgs) {
           return {
             type: 'message',
@@ -451,7 +367,7 @@ export const languageCommand: SlashCommand = {
           };
         }
 
-        return generateLlmOutputLanguageRuleFile(trimmedArgs);
+        return setOutputLanguage(context, trimmedArgs);
       },
     },
   ],

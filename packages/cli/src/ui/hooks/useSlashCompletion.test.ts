@@ -246,6 +246,36 @@ describe('useSlashCompletion', () => {
       });
     });
 
+    it('should prefer higher completionPriority when match quality ties', async () => {
+      const slashCommands = [
+        createTestCommand({
+          name: 'mock',
+          description: 'Mock command',
+        }),
+        createTestCommand({
+          name: 'model',
+          description: 'Model command',
+          completionPriority: 100,
+        }),
+      ];
+
+      const { result } = renderHook(() =>
+        useTestHarnessForSlashCompletion(
+          true,
+          '/mo',
+          slashCommands,
+          mockCommandContext,
+        ),
+      );
+
+      await waitFor(() => {
+        expect(result.current.suggestions.map((s) => s.value)).toEqual([
+          'model',
+          'mock',
+        ]);
+      });
+    });
+
     it('should suggest commands based on partial altNames', async () => {
       const slashCommands = [
         createTestCommand({
@@ -569,6 +599,45 @@ describe('useSlashCompletion', () => {
       await waitFor(() => {
         expect(result.current.suggestions).toEqual([
           { label: '--project', value: '--project' },
+        ]);
+      });
+    });
+
+    it('should map completion items with descriptions for argument suggestions', async () => {
+      const mockCompletionFn = vi.fn().mockResolvedValue([
+        { value: 'pdf', description: 'Create PDF documents' },
+        { value: 'xlsx', description: 'Work with spreadsheets' },
+      ]);
+
+      const slashCommands = [
+        createTestCommand({
+          name: 'skills',
+          description: 'List available skills',
+          completion: mockCompletionFn,
+        }),
+      ];
+
+      const { result } = renderHook(() =>
+        useTestHarnessForSlashCompletion(
+          true,
+          '/skills ',
+          slashCommands,
+          mockCommandContext,
+        ),
+      );
+
+      await waitFor(() => {
+        expect(result.current.suggestions).toEqual([
+          {
+            label: 'pdf',
+            value: 'pdf',
+            description: 'Create PDF documents',
+          },
+          {
+            label: 'xlsx',
+            value: 'xlsx',
+            description: 'Work with spreadsheets',
+          },
         ]);
       });
     });

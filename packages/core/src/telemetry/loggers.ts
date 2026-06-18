@@ -8,8 +8,8 @@ import type { LogAttributes, LogRecord } from '@opentelemetry/api-logs';
 import { logs } from '@opentelemetry/api-logs';
 import { SemanticAttributes } from '@opentelemetry/semantic-conventions';
 import type { Config } from '../config/config.js';
+import { isInternalPromptId } from '../utils/internalPromptIds.js';
 import { safeJsonStringify } from '../utils/safeJsonStringify.js';
-import { UserAccountManager } from '../utils/userAccountManager.js';
 import {
   EVENT_API_ERROR,
   EVENT_API_CANCEL,
@@ -21,6 +21,7 @@ import {
   EVENT_IDE_CONNECTION,
   EVENT_TOOL_CALL,
   EVENT_USER_PROMPT,
+  EVENT_USER_RETRY,
   EVENT_FLASH_FALLBACK,
   EVENT_NEXT_SPEAKER_CHECK,
   SERVICE_NAME,
@@ -38,6 +39,14 @@ import {
   EVENT_MALFORMED_JSON_RESPONSE,
   EVENT_INVALID_CHUNK,
   EVENT_AUTH,
+  EVENT_SKILL_LAUNCH,
+  EVENT_EXTENSION_UPDATE,
+  EVENT_USER_FEEDBACK,
+  EVENT_ARENA_SESSION_STARTED,
+  EVENT_ARENA_AGENT_COMPLETED,
+  EVENT_ARENA_SESSION_ENDED,
+  EVENT_PROMPT_SUGGESTION,
+  EVENT_SPECULATION,
 } from './constants.js';
 import {
   recordApiErrorMetrics,
@@ -51,6 +60,9 @@ import {
   recordSubagentExecutionMetrics,
   recordTokenUsageMetrics,
   recordToolCallMetrics,
+  recordArenaSessionStartedMetrics,
+  recordArenaAgentCompletedMetrics,
+  recordArenaSessionEndedMetrics,
 } from './metrics.js';
 import { QwenLogger } from './qwen-logger/qwen-logger.js';
 import { isTelemetrySdkInitialized } from './sdk.js';
@@ -64,6 +76,7 @@ import type {
   StartSessionEvent,
   ToolCallEvent,
   UserPromptEvent,
+  UserRetryEvent,
   FlashFallbackEvent,
   NextSpeakerCheckEvent,
   LoopDetectedEvent,
@@ -79,13 +92,22 @@ import type {
   ExtensionDisableEvent,
   ExtensionEnableEvent,
   ExtensionUninstallEvent,
+  ExtensionUpdateEvent,
   ExtensionInstallEvent,
   ModelSlashCommandEvent,
   SubagentExecutionEvent,
   MalformedJsonResponseEvent,
   InvalidChunkEvent,
   AuthEvent,
+  SkillLaunchEvent,
+  UserFeedbackEvent,
+  ArenaSessionStartedEvent,
+  ArenaAgentCompletedEvent,
+  ArenaSessionEndedEvent,
+  PromptSuggestionEvent,
+  SpeculationEvent,
 } from './types.js';
+import type { HookCallEvent } from './types.js';
 import type { UiEvent } from './uiTelemetry.js';
 import { uiTelemetryService } from './uiTelemetry.js';
 
@@ -93,13 +115,12 @@ const shouldLogUserPrompts = (config: Config): boolean =>
   config.getTelemetryLogPromptsEnabled();
 
 function getCommonAttributes(config: Config): LogAttributes {
-  const userAccountManager = new UserAccountManager();
-  const email = userAccountManager.getCachedGoogleAccount();
   return {
     'session.id': config.getSessionId(),
-    ...(email && { 'user.email': email }),
   };
 }
+
+export { getCommonAttributes };
 
 export function logStartSession(
   config: Config,
@@ -113,20 +134,23 @@ export function logStartSession(
     'event.name': EVENT_CLI_CONFIG,
     'event.timestamp': new Date().toISOString(),
     model: event.model,
-    embedding_model: event.embedding_model,
     sandbox_enabled: event.sandbox_enabled,
     core_tools_enabled: event.core_tools_enabled,
     approval_mode: event.approval_mode,
-    api_key_enabled: event.api_key_enabled,
-    vertex_ai_enabled: event.vertex_ai_enabled,
-    log_user_prompts_enabled: event.telemetry_log_user_prompts_enabled,
     file_filtering_respect_git_ignore: event.file_filtering_respect_git_ignore,
     debug_mode: event.debug_enabled,
+    truncate_tool_output_threshold: event.truncate_tool_output_threshold,
+    truncate_tool_output_lines: event.truncate_tool_output_lines,
     mcp_servers: event.mcp_servers,
     mcp_servers_count: event.mcp_servers_count,
     mcp_tools: event.mcp_tools,
     mcp_tools_count: event.mcp_tools_count,
+    hooks: event.hooks,
+    ide_enabled: event.ide_enabled,
+    interactive_shell_enabled: event.interactive_shell_enabled,
     output_format: event.output_format,
+    skills: event.skills,
+    subagents: event.subagents,
   };
 
   const logger = logs.getLogger(SERVICE_NAME);
@@ -165,6 +189,25 @@ export function logUserPrompt(config: Config, event: UserPromptEvent): void {
   logger.emit(logRecord);
 }
 
+export function logUserRetry(config: Config, event: UserRetryEvent): void {
+  QwenLogger.getInstance(config)?.logRetryEvent(event);
+  if (!isTelemetrySdkInitialized()) return;
+
+  const attributes: LogAttributes = {
+    ...getCommonAttributes(config),
+    'event.name': EVENT_USER_RETRY,
+    'event.timestamp': new Date().toISOString(),
+    prompt_id: event.prompt_id,
+  };
+
+  const logger = logs.getLogger(SERVICE_NAME);
+  const logRecord: LogRecord = {
+    body: `User retry.`,
+    attributes,
+  };
+  logger.emit(logRecord);
+}
+
 export function logToolCall(config: Config, event: ToolCallEvent): void {
   const uiEvent = {
     ...event,
@@ -172,7 +215,9 @@ export function logToolCall(config: Config, event: ToolCallEvent): void {
     'event.timestamp': new Date().toISOString(),
   } as UiEvent;
   uiTelemetryService.addEvent(uiEvent);
-  config.getChatRecordingService()?.recordUiTelemetryEvent(uiEvent);
+  if (!isInternalPromptId(event.prompt_id)) {
+    config.getChatRecordingService()?.recordUiTelemetryEvent(uiEvent);
+  }
   QwenLogger.getInstance(config)?.logToolCallEvent(event);
   if (!isTelemetrySdkInitialized()) return;
 
@@ -340,7 +385,9 @@ export function logApiError(config: Config, event: ApiErrorEvent): void {
     'event.timestamp': new Date().toISOString(),
   } as UiEvent;
   uiTelemetryService.addEvent(uiEvent);
-  config.getChatRecordingService()?.recordUiTelemetryEvent(uiEvent);
+  if (!isInternalPromptId(event.prompt_id)) {
+    config.getChatRecordingService()?.recordUiTelemetryEvent(uiEvent);
+  }
   QwenLogger.getInstance(config)?.logApiErrorEvent(event);
   if (!isTelemetrySdkInitialized()) return;
 
@@ -349,7 +396,7 @@ export function logApiError(config: Config, event: ApiErrorEvent): void {
     ...event,
     'event.name': EVENT_API_ERROR,
     'event.timestamp': new Date().toISOString(),
-    ['error.message']: event.error,
+    ['error.message']: event.error_message,
     model_name: event.model,
     duration: event.duration_ms,
   };
@@ -363,7 +410,7 @@ export function logApiError(config: Config, event: ApiErrorEvent): void {
 
   const logger = logs.getLogger(SERVICE_NAME);
   const logRecord: LogRecord = {
-    body: `API error for ${event.model}. Error: ${event.error}. Duration: ${event.duration_ms}ms.`,
+    body: `API error for ${event.model}. Error: ${event.error_message}. Duration: ${event.duration_ms}ms.`,
     attributes,
   };
   logger.emit(logRecord);
@@ -407,7 +454,9 @@ export function logApiResponse(config: Config, event: ApiResponseEvent): void {
     'event.timestamp': new Date().toISOString(),
   } as UiEvent;
   uiTelemetryService.addEvent(uiEvent);
-  config.getChatRecordingService()?.recordUiTelemetryEvent(uiEvent);
+  if (!isInternalPromptId(event.prompt_id)) {
+    config.getChatRecordingService()?.recordUiTelemetryEvent(uiEvent);
+  }
   QwenLogger.getInstance(config)?.logApiResponseEvent(event);
   if (!isTelemetrySdkInitialized()) return;
   const attributes: LogAttributes = {
@@ -752,6 +801,11 @@ export function logModelSlashCommand(
   recordModelSlashCommand(config, event);
 }
 
+export function logHookCall(config: Config, event: HookCallEvent): void {
+  // Log to QwenLogger for RUM telemetry only
+  QwenLogger.getInstance(config)?.logHookCallEvent(event);
+}
+
 export function logExtensionInstallEvent(
   config: Config,
   event: ExtensionInstallEvent,
@@ -795,6 +849,32 @@ export function logExtensionUninstall(
   const logger = logs.getLogger(SERVICE_NAME);
   const logRecord: LogRecord = {
     body: `Uninstalled extension ${event.extension_name}`,
+    attributes,
+  };
+  logger.emit(logRecord);
+}
+
+export async function logExtensionUpdateEvent(
+  config: Config,
+  event: ExtensionUpdateEvent,
+): Promise<void> {
+  QwenLogger.getInstance(config)?.logExtensionUpdateEvent(event);
+
+  const attributes: LogAttributes = {
+    ...getCommonAttributes(config),
+    ...event,
+    'event.name': EVENT_EXTENSION_UPDATE,
+    'event.timestamp': new Date().toISOString(),
+    extension_name: event.extension_name,
+    extension_id: event.extension_id,
+    extension_previous_version: event.extension_previous_version,
+    extension_version: event.extension_version,
+    extension_source: event.extension_source,
+  };
+
+  const logger = logs.getLogger(SERVICE_NAME);
+  const logRecord: LogRecord = {
+    body: `Updated extension ${event.extension_name} from ${event.extension_previous_version} to ${event.extension_version}`,
     attributes,
   };
   logger.emit(logRecord);
@@ -865,6 +945,212 @@ export function logAuth(config: Config, event: AuthEvent): void {
   const logger = logs.getLogger(SERVICE_NAME);
   const logRecord: LogRecord = {
     body: `Auth event: ${event.action_type} ${event.status} for ${event.auth_type}`,
+    attributes,
+  };
+  logger.emit(logRecord);
+}
+
+export function logSkillLaunch(config: Config, event: SkillLaunchEvent): void {
+  if (!isTelemetrySdkInitialized()) return;
+
+  const attributes: LogAttributes = {
+    ...getCommonAttributes(config),
+    ...event,
+    'event.name': EVENT_SKILL_LAUNCH,
+    'event.timestamp': new Date().toISOString(),
+  };
+
+  const logger = logs.getLogger(SERVICE_NAME);
+  const logRecord: LogRecord = {
+    body: `Skill launch: ${event.skill_name}. Success: ${event.success}.`,
+    attributes,
+  };
+  logger.emit(logRecord);
+}
+
+export function logUserFeedback(
+  config: Config,
+  event: UserFeedbackEvent,
+): void {
+  const uiEvent = {
+    ...event,
+    'event.name': EVENT_USER_FEEDBACK,
+    'event.timestamp': new Date().toISOString(),
+  } as UiEvent;
+  uiTelemetryService.addEvent(uiEvent);
+  config.getChatRecordingService()?.recordUiTelemetryEvent(uiEvent);
+  QwenLogger.getInstance(config)?.logUserFeedbackEvent(event);
+  if (!isTelemetrySdkInitialized()) return;
+
+  const attributes: LogAttributes = {
+    ...getCommonAttributes(config),
+    ...event,
+    'event.name': EVENT_USER_FEEDBACK,
+    'event.timestamp': new Date().toISOString(),
+  };
+
+  const logger = logs.getLogger(SERVICE_NAME);
+  const logRecord: LogRecord = {
+    body: `User feedback: Rating ${event.rating} for session ${event.session_id}.`,
+    attributes,
+  };
+  logger.emit(logRecord);
+}
+
+export function logArenaSessionStarted(
+  config: Config,
+  event: ArenaSessionStartedEvent,
+): void {
+  QwenLogger.getInstance(config)?.logArenaSessionStartedEvent(event);
+  if (!isTelemetrySdkInitialized()) return;
+
+  const attributes: LogAttributes = {
+    ...getCommonAttributes(config),
+    ...event,
+    model_ids: JSON.stringify(event.model_ids),
+    'event.name': EVENT_ARENA_SESSION_STARTED,
+    'event.timestamp': new Date().toISOString(),
+  };
+
+  const logger = logs.getLogger(SERVICE_NAME);
+  const logRecord: LogRecord = {
+    body: `Arena session started. Agents: ${event.model_ids.length}.`,
+    attributes,
+  };
+  logger.emit(logRecord);
+  recordArenaSessionStartedMetrics(config);
+}
+
+export function logArenaAgentCompleted(
+  config: Config,
+  event: ArenaAgentCompletedEvent,
+): void {
+  QwenLogger.getInstance(config)?.logArenaAgentCompletedEvent(event);
+  if (!isTelemetrySdkInitialized()) return;
+
+  const attributes: LogAttributes = {
+    ...getCommonAttributes(config),
+    ...event,
+    'event.name': EVENT_ARENA_AGENT_COMPLETED,
+    'event.timestamp': new Date().toISOString(),
+  };
+
+  const logger = logs.getLogger(SERVICE_NAME);
+  const logRecord: LogRecord = {
+    body: `Arena agent ${event.agent_model_id} ${event.status}. Duration: ${event.duration_ms}ms. Tokens: ${event.total_tokens}.`,
+    attributes,
+  };
+  logger.emit(logRecord);
+  recordArenaAgentCompletedMetrics(
+    config,
+    event.agent_model_id,
+    event.status,
+    event.duration_ms,
+    event.input_tokens,
+    event.output_tokens,
+  );
+}
+
+export function logArenaSessionEnded(
+  config: Config,
+  event: ArenaSessionEndedEvent,
+): void {
+  QwenLogger.getInstance(config)?.logArenaSessionEndedEvent(event);
+  if (!isTelemetrySdkInitialized()) return;
+
+  const attributes: LogAttributes = {
+    ...getCommonAttributes(config),
+    ...event,
+    'event.name': EVENT_ARENA_SESSION_ENDED,
+    'event.timestamp': new Date().toISOString(),
+  };
+
+  const logger = logs.getLogger(SERVICE_NAME);
+  const logRecord: LogRecord = {
+    body: `Arena session ended: ${event.status}.${event.winner_model_id ? ` Winner: ${event.winner_model_id}.` : ''}`,
+    attributes,
+  };
+  logger.emit(logRecord);
+  recordArenaSessionEndedMetrics(
+    config,
+    event.status,
+    event.display_backend,
+    event.duration_ms,
+    event.winner_model_id,
+  );
+}
+
+export function logPromptSuggestion(
+  config: Config,
+  event: PromptSuggestionEvent,
+): void {
+  if (!isTelemetrySdkInitialized()) return;
+
+  const attributes: LogAttributes = {
+    ...getCommonAttributes(config),
+    'event.name': EVENT_PROMPT_SUGGESTION,
+    'event.timestamp': event['event.timestamp'],
+    outcome: event.outcome,
+  };
+
+  if (event.prompt_id) {
+    attributes['prompt_id'] = event.prompt_id;
+  }
+  if (event.accept_method) {
+    attributes['accept_method'] = event.accept_method;
+  }
+  if (event.time_to_accept_ms !== undefined) {
+    attributes['time_to_accept_ms'] = event.time_to_accept_ms;
+  }
+  if (event.time_to_ignore_ms !== undefined) {
+    attributes['time_to_ignore_ms'] = event.time_to_ignore_ms;
+  }
+  if (event.time_to_first_keystroke_ms !== undefined) {
+    attributes['time_to_first_keystroke_ms'] = event.time_to_first_keystroke_ms;
+  }
+  if (event.suggestion_length !== undefined) {
+    attributes['suggestion_length'] = event.suggestion_length;
+  }
+  if (event.similarity !== undefined) {
+    attributes['similarity'] = event.similarity;
+  }
+  if (event.was_focused_when_shown !== undefined) {
+    attributes['was_focused_when_shown'] = event.was_focused_when_shown;
+  }
+  if (event.reason) {
+    attributes['reason'] = event.reason;
+  }
+
+  const logger = logs.getLogger(SERVICE_NAME);
+  const logRecord: LogRecord = {
+    body: `Prompt suggestion: ${event.outcome}.`,
+    attributes,
+  };
+  logger.emit(logRecord);
+}
+
+export function logSpeculation(config: Config, event: SpeculationEvent): void {
+  if (!isTelemetrySdkInitialized()) return;
+
+  const attributes: LogAttributes = {
+    ...getCommonAttributes(config),
+    'event.name': EVENT_SPECULATION,
+    'event.timestamp': event['event.timestamp'],
+    outcome: event.outcome,
+    turns_used: event.turns_used,
+    files_written: event.files_written,
+    tool_use_count: event.tool_use_count,
+    duration_ms: event.duration_ms,
+    had_pipelined_suggestion: event.had_pipelined_suggestion,
+  };
+
+  if (event.boundary_type) {
+    attributes['boundary_type'] = event.boundary_type;
+  }
+
+  const logger = logs.getLogger(SERVICE_NAME);
+  const logRecord: LogRecord = {
+    body: `Speculation: ${event.outcome}.`,
     attributes,
   };
   logger.emit(logRecord);

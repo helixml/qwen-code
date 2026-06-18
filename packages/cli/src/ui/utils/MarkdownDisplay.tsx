@@ -8,7 +8,7 @@ import React from 'react';
 import { Text, Box } from 'ink';
 import { theme } from '../semantic-colors.js';
 import { colorizeCode } from './CodeColorizer.js';
-import { TableRenderer } from './TableRenderer.js';
+import { TableRenderer, type ColumnAlign } from './TableRenderer.js';
 import { RenderInline } from './InlineMarkdownRenderer.js';
 import { useSettings } from '../contexts/SettingsContext.js';
 
@@ -16,7 +16,7 @@ interface MarkdownDisplayProps {
   text: string;
   isPending: boolean;
   availableTerminalHeight?: number;
-  terminalWidth: number;
+  contentWidth: number;
   textColor?: string;
 }
 
@@ -31,7 +31,7 @@ const MarkdownDisplayInternal: React.FC<MarkdownDisplayProps> = ({
   text,
   isPending,
   availableTerminalHeight,
-  terminalWidth,
+  contentWidth,
   textColor = theme.text.primary,
 }) => {
   if (!text) return <></>;
@@ -43,7 +43,22 @@ const MarkdownDisplayInternal: React.FC<MarkdownDisplayProps> = ({
   const olItemRegex = /^([ \t]*)(\d+)\. +(.*)/;
   const hrRegex = /^ *([-*_] *){3,} *$/;
   const tableRowRegex = /^\s*\|(.+)\|\s*$/;
-  const tableSeparatorRegex = /^\s*\|?\s*(:?-+:?)\s*(\|\s*(:?-+:?)\s*)+\|?\s*$/;
+  const tableSeparatorRegex =
+    /^(?=.*\|)\s*\|?\s*(:?-+:?)\s*(\|\s*(:?-+:?)\s*)*\|?\s*$/;
+
+  /** Parse column alignments from a markdown table separator like `|:---|:---:|---:|` */
+  const parseTableAligns = (line: string): ColumnAlign[] =>
+    line
+      .split(/(?<!\\)\|/)
+      .map((cell) => cell.trim())
+      .filter((cell) => cell.length > 0)
+      .map((cell) => {
+        const startsWithColon = cell.startsWith(':');
+        const endsWithColon = cell.endsWith(':');
+        if (startsWithColon && endsWithColon) return 'center';
+        if (endsWithColon) return 'right';
+        return 'left';
+      });
 
   const contentBlocks: React.ReactNode[] = [];
   let inCodeBlock = false;
@@ -54,6 +69,7 @@ const MarkdownDisplayInternal: React.FC<MarkdownDisplayProps> = ({
   let inTable = false;
   let tableRows: string[][] = [];
   let tableHeaders: string[] = [];
+  let tableAligns: ColumnAlign[] = [];
 
   function addContentBlock(block: React.ReactNode) {
     if (block) {
@@ -79,7 +95,7 @@ const MarkdownDisplayInternal: React.FC<MarkdownDisplayProps> = ({
             lang={codeBlockLang}
             isPending={isPending}
             availableTerminalHeight={availableTerminalHeight}
-            terminalWidth={terminalWidth}
+            contentWidth={contentWidth}
           />,
         );
         inCodeBlock = false;
@@ -105,13 +121,22 @@ const MarkdownDisplayInternal: React.FC<MarkdownDisplayProps> = ({
       codeBlockFence = codeFenceMatch[1];
       codeBlockLang = codeFenceMatch[2] || null;
     } else if (tableRowMatch && !inTable) {
-      // Potential table start - check if next line is separator
-      if (
-        index + 1 < lines.length &&
-        lines[index + 1].match(tableSeparatorRegex)
-      ) {
+      // Potential table start - check if next line is separator with matching column count
+      const potentialHeaders = tableRowMatch[1]
+        .split(/(?<!\\)\|/)
+        .map((cell) => cell.trim().replaceAll('\\|', '|'));
+      const nextLine = index + 1 < lines.length ? lines[index + 1]! : '';
+      const sepMatch = nextLine.match(tableSeparatorRegex);
+      const sepColCount = sepMatch
+        ? nextLine
+            .split(/(?<!\\)\|/)
+            .map((c) => c.trim())
+            .filter((c) => c.length > 0).length
+        : 0;
+
+      if (sepMatch && sepColCount === potentialHeaders.length) {
         inTable = true;
-        tableHeaders = tableRowMatch[1].split('|').map((cell) => cell.trim());
+        tableHeaders = potentialHeaders;
         tableRows = [];
       } else {
         // Not a table, treat as regular text
@@ -124,10 +149,13 @@ const MarkdownDisplayInternal: React.FC<MarkdownDisplayProps> = ({
         );
       }
     } else if (inTable && tableSeparatorMatch) {
-      // Skip separator line - already handled
+      // Parse alignment from separator line
+      tableAligns = parseTableAligns(line);
     } else if (inTable && tableRowMatch) {
       // Add table row
-      const cells = tableRowMatch[1].split('|').map((cell) => cell.trim());
+      const cells = tableRowMatch[1]
+        .split(/(?<!\\)\|/)
+        .map((cell) => cell.trim().replaceAll('\\|', '|'));
       // Ensure row has same column count as headers
       while (cells.length < tableHeaders.length) {
         cells.push('');
@@ -144,13 +172,15 @@ const MarkdownDisplayInternal: React.FC<MarkdownDisplayProps> = ({
             key={`table-${contentBlocks.length}`}
             headers={tableHeaders}
             rows={tableRows}
-            terminalWidth={terminalWidth}
+            contentWidth={contentWidth}
+            aligns={tableAligns}
           />,
         );
       }
       inTable = false;
       tableRows = [];
       tableHeaders = [];
+      tableAligns = [];
 
       // Process current line as normal
       if (line.trim().length > 0) {
@@ -266,7 +296,7 @@ const MarkdownDisplayInternal: React.FC<MarkdownDisplayProps> = ({
         lang={codeBlockLang}
         isPending={isPending}
         availableTerminalHeight={availableTerminalHeight}
-        terminalWidth={terminalWidth}
+        contentWidth={contentWidth}
       />,
     );
   }
@@ -278,7 +308,8 @@ const MarkdownDisplayInternal: React.FC<MarkdownDisplayProps> = ({
         key={`table-${contentBlocks.length}`}
         headers={tableHeaders}
         rows={tableRows}
-        terminalWidth={terminalWidth}
+        contentWidth={contentWidth}
+        aligns={tableAligns}
       />,
     );
   }
@@ -293,7 +324,7 @@ interface RenderCodeBlockProps {
   lang: string | null;
   isPending: boolean;
   availableTerminalHeight?: number;
-  terminalWidth: number;
+  contentWidth: number;
 }
 
 const RenderCodeBlockInternal: React.FC<RenderCodeBlockProps> = ({
@@ -301,7 +332,7 @@ const RenderCodeBlockInternal: React.FC<RenderCodeBlockProps> = ({
   lang,
   isPending,
   availableTerminalHeight,
-  terminalWidth,
+  contentWidth,
 }) => {
   const settings = useSettings();
   const MIN_LINES_FOR_MESSAGE = 1; // Minimum lines to show before the "generating more" message
@@ -329,7 +360,7 @@ const RenderCodeBlockInternal: React.FC<RenderCodeBlockProps> = ({
         truncatedContent.join('\n'),
         lang,
         availableTerminalHeight,
-        terminalWidth - CODE_BLOCK_PREFIX_PADDING,
+        contentWidth - CODE_BLOCK_PREFIX_PADDING,
         undefined,
         settings,
       );
@@ -347,7 +378,7 @@ const RenderCodeBlockInternal: React.FC<RenderCodeBlockProps> = ({
     fullContent,
     lang,
     availableTerminalHeight,
-    terminalWidth - CODE_BLOCK_PREFIX_PADDING,
+    contentWidth - CODE_BLOCK_PREFIX_PADDING,
     undefined,
     settings,
   );
@@ -356,7 +387,7 @@ const RenderCodeBlockInternal: React.FC<RenderCodeBlockProps> = ({
     <Box
       paddingLeft={CODE_BLOCK_PREFIX_PADDING}
       flexDirection="column"
-      width={terminalWidth}
+      width={contentWidth}
       flexShrink={0}
     >
       {colorizedCode}
@@ -407,15 +438,22 @@ const RenderListItem = React.memo(RenderListItemInternal);
 interface RenderTableProps {
   headers: string[];
   rows: string[][];
-  terminalWidth: number;
+  contentWidth: number;
+  aligns?: ColumnAlign[];
 }
 
 const RenderTableInternal: React.FC<RenderTableProps> = ({
   headers,
   rows,
-  terminalWidth,
+  contentWidth,
+  aligns,
 }) => (
-  <TableRenderer headers={headers} rows={rows} terminalWidth={terminalWidth} />
+  <TableRenderer
+    headers={headers}
+    rows={rows}
+    contentWidth={contentWidth}
+    aligns={aligns}
+  />
 );
 
 const RenderTable = React.memo(RenderTableInternal);

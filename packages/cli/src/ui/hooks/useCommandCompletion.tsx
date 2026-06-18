@@ -39,12 +39,13 @@ export interface UseCommandCompletionReturn {
 
 export function useCommandCompletion(
   buffer: TextBuffer,
-  dirs: readonly string[],
   cwd: string,
   slashCommands: readonly SlashCommand[],
   commandContext: CommandContext,
   reverseSearchActive: boolean = false,
   config?: Config,
+  // When false, suppresses showing suggestions (e.g., after history navigation)
+  active: boolean = true,
 ): UseCommandCompletionReturn {
   const {
     suggestions,
@@ -72,15 +73,9 @@ export function useCommandCompletion(
   const { completionMode, query, completionStart, completionEnd } =
     useMemo(() => {
       const currentLine = buffer.lines[cursorRow] || '';
-      if (cursorRow === 0 && isSlashCommand(currentLine.trim())) {
-        return {
-          completionMode: CompletionMode.SLASH,
-          query: currentLine,
-          completionStart: 0,
-          completionEnd: currentLine.length,
-        };
-      }
 
+      // Check for @ completion first, so that typing @ after a slash command
+      // still triggers file search (see #2518).
       const codePoints = toCodePoints(currentLine);
       for (let i = cursorCol - 1; i >= 0; i--) {
         const char = codePoints[i];
@@ -119,6 +114,15 @@ export function useCommandCompletion(
         }
       }
 
+      if (cursorRow === 0 && isSlashCommand(currentLine.trim())) {
+        return {
+          completionMode: CompletionMode.SLASH,
+          query: currentLine,
+          completionStart: 0,
+          completionEnd: currentLine.length,
+        };
+      }
+
       return {
         completionMode: CompletionMode.IDLE,
         query: null,
@@ -152,7 +156,11 @@ export function useCommandCompletion(
   }, [suggestions, setActiveSuggestionIndex, setVisibleStartIndex]);
 
   useEffect(() => {
-    if (completionMode === CompletionMode.IDLE || reverseSearchActive) {
+    if (
+      completionMode === CompletionMode.IDLE ||
+      reverseSearchActive ||
+      !active
+    ) {
       resetCompletionState();
       return;
     }
@@ -163,6 +171,7 @@ export function useCommandCompletion(
     suggestions.length,
     isLoadingSuggestions,
     reverseSearchActive,
+    active,
     resetCompletionState,
     setShowSuggestions,
   ]);

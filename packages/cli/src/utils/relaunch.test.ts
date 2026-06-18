@@ -33,14 +33,12 @@ import { relaunchAppInChildProcess, relaunchOnExitCode } from './relaunch.js';
 
 describe('relaunchOnExitCode', () => {
   let processExitSpy: MockInstance;
-  let consoleErrorSpy: MockInstance;
   let stdinResumeSpy: MockInstance;
 
   beforeEach(() => {
     processExitSpy = vi.spyOn(process, 'exit').mockImplementation(() => {
       throw new Error('PROCESS_EXIT_CALLED');
     });
-    consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
     stdinResumeSpy = vi
       .spyOn(process.stdin, 'resume')
       .mockImplementation(() => process.stdin);
@@ -49,7 +47,6 @@ describe('relaunchOnExitCode', () => {
 
   afterEach(() => {
     processExitSpy.mockRestore();
-    consoleErrorSpy.mockRestore();
     stdinResumeSpy.mockRestore();
   });
 
@@ -90,10 +87,6 @@ describe('relaunchOnExitCode', () => {
     );
 
     expect(runner).toHaveBeenCalledTimes(1);
-    expect(consoleErrorSpy).toHaveBeenCalledWith(
-      'Fatal error: Failed to relaunch the CLI process.',
-      error,
-    );
     expect(stdinResumeSpy).toHaveBeenCalled();
     expect(processExitSpy).toHaveBeenCalledWith(1);
   });
@@ -101,7 +94,6 @@ describe('relaunchOnExitCode', () => {
 
 describe('relaunchAppInChildProcess', () => {
   let processExitSpy: MockInstance;
-  let consoleErrorSpy: MockInstance;
   let stdinPauseSpy: MockInstance;
   let stdinResumeSpy: MockInstance;
 
@@ -115,7 +107,7 @@ describe('relaunchAppInChildProcess', () => {
     vi.clearAllMocks();
 
     process.env = { ...originalEnv };
-    delete process.env['GEMINI_CLI_NO_RELAUNCH'];
+    delete process.env['QWEN_CODE_NO_RELAUNCH'];
 
     process.execArgv = [...originalExecArgv];
     process.argv = [...originalArgv];
@@ -124,7 +116,6 @@ describe('relaunchAppInChildProcess', () => {
     processExitSpy = vi.spyOn(process, 'exit').mockImplementation(() => {
       throw new Error('PROCESS_EXIT_CALLED');
     });
-    consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
     stdinPauseSpy = vi
       .spyOn(process.stdin, 'pause')
       .mockImplementation(() => process.stdin);
@@ -140,14 +131,13 @@ describe('relaunchAppInChildProcess', () => {
     process.execPath = originalExecPath;
 
     processExitSpy.mockRestore();
-    consoleErrorSpy.mockRestore();
     stdinPauseSpy.mockRestore();
     stdinResumeSpy.mockRestore();
   });
 
-  describe('when GEMINI_CLI_NO_RELAUNCH is set', () => {
+  describe('when QWEN_CODE_NO_RELAUNCH is set', () => {
     it('should return early without spawning a child process', async () => {
-      process.env['GEMINI_CLI_NO_RELAUNCH'] = 'true';
+      process.env['QWEN_CODE_NO_RELAUNCH'] = 'true';
 
       await relaunchAppInChildProcess(['--test'], ['--verbose']);
 
@@ -156,9 +146,9 @@ describe('relaunchAppInChildProcess', () => {
     });
   });
 
-  describe('when GEMINI_CLI_NO_RELAUNCH is not set', () => {
+  describe('when QWEN_CODE_NO_RELAUNCH is not set', () => {
     beforeEach(() => {
-      delete process.env['GEMINI_CLI_NO_RELAUNCH'];
+      delete process.env['QWEN_CODE_NO_RELAUNCH'];
     });
 
     it('should construct correct node arguments from execArgv, additionalNodeArgs, script, additionalScriptArgs, and argv', () => {

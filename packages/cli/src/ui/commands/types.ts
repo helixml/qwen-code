@@ -4,12 +4,13 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import type { ReactNode } from 'react';
+import type { MutableRefObject, ReactNode } from 'react';
 import type { Content, PartListUnion } from '@google/genai';
 import type { Config, GitService, Logger } from '@qwen-code/qwen-code-core';
 import type {
   HistoryItemWithoutId,
   HistoryItem,
+  HistoryItemBtw,
   ConfirmationRequest,
 } from '../types.js';
 import type { LoadedSettings } from '../../config/settings.js';
@@ -22,6 +23,14 @@ import type {
 
 // Grouped dependencies for clarity and easier mocking
 export interface CommandContext {
+  /**
+   * Execution mode for the current invocation.
+   *
+   * - interactive: React/Ink UI mode
+   * - non_interactive: non-interactive CLI mode (text/json)
+   * - acp: ACP/Zed integration mode
+   */
+  executionMode?: 'interactive' | 'non_interactive' | 'acp';
   // Invocation properties for when commands are called.
   invocation?: {
     /** The raw, untrimmed input string from the user. */
@@ -58,14 +67,20 @@ export interface CommandContext {
      * @param item The history item to display as pending, or `null` to clear.
      */
     setPendingItem: (item: HistoryItemWithoutId | null) => void;
+    /** The current btw side-question item rendered in the fixed bottom area. */
+    btwItem: HistoryItemBtw | null;
+    /** Sets the btw item independently of the main pendingItem. */
+    setBtwItem: (item: HistoryItemBtw | null) => void;
+    /** Cancels a pending btw (aborts the in-flight API call and clears the btw area). */
+    cancelBtw: () => void;
+    /** Ref to the btw AbortController, set by btwCommand so cancelBtw can abort it. */
+    btwAbortControllerRef: MutableRefObject<AbortController | null>;
     /**
      * Loads a new set of history items, replacing the current history.
      *
      * @param history The array of history items to load.
      */
     loadHistory: UseHistoryManagerReturn['loadHistory'];
-    /** Toggles a special display mode. */
-    toggleCorgiMode: () => void;
     toggleVimEnabled: () => Promise<boolean>;
     setGeminiMdFileCount: (count: number) => void;
     reloadCommands: () => void;
@@ -83,6 +98,8 @@ export interface CommandContext {
   };
   // Flag to indicate if an overwrite has been confirmed
   overwriteConfirmed?: boolean;
+  /** Abort signal for cancelling long-running slash command operations via ESC. */
+  abortSignal?: AbortSignal;
 }
 
 /**
@@ -111,6 +128,19 @@ export interface MessageActionReturn {
 }
 
 /**
+ * The return type for a command action that streams multiple messages.
+ * Used for long-running operations that need to send progress updates.
+ */
+export interface StreamMessagesActionReturn {
+  type: 'stream_messages';
+  messages: AsyncGenerator<
+    { messageType: 'info' | 'error'; content: string },
+    void,
+    unknown
+  >;
+}
+
+/**
  * The return type for a command action that needs to open a dialog.
  */
 export interface OpenDialogActionReturn {
@@ -118,15 +148,25 @@ export interface OpenDialogActionReturn {
 
   dialog:
     | 'help'
+    | 'arena_start'
+    | 'arena_select'
+    | 'arena_stop'
+    | 'arena_status'
     | 'auth'
     | 'theme'
     | 'editor'
     | 'settings'
     | 'model'
+    | 'fast-model'
     | 'subagent_create'
     | 'subagent_list'
+    | 'trust'
     | 'permissions'
-    | 'approval-mode';
+    | 'approval-mode'
+    | 'resume'
+    | 'extensions_manage'
+    | 'hooks'
+    | 'mcp';
 }
 
 /**
@@ -175,6 +215,7 @@ export interface ConfirmActionReturn {
 export type SlashCommandActionReturn =
   | ToolActionReturn
   | MessageActionReturn
+  | StreamMessagesActionReturn
   | QuitActionReturn
   | OpenDialogActionReturn
   | LoadHistoryActionReturn
@@ -186,6 +227,13 @@ export enum CommandKind {
   BUILT_IN = 'built-in',
   FILE = 'file',
   MCP_PROMPT = 'mcp-prompt',
+  SKILL = 'skill',
+}
+
+export interface CommandCompletionItem {
+  value: string;
+  label?: string;
+  description?: string;
 }
 
 // The standardized contract for any command in the system.
@@ -194,6 +242,8 @@ export interface SlashCommand {
   altNames?: string[];
   description: string;
   hidden?: boolean;
+  /** Higher values win when slash completion candidates have comparable match quality. */
+  completionPriority?: number;
 
   kind: CommandKind;
 
@@ -213,7 +263,7 @@ export interface SlashCommand {
   completion?: (
     context: CommandContext,
     partialArg: string,
-  ) => Promise<string[]>;
+  ) => Promise<Array<string | CommandCompletionItem> | null>;
 
   subCommands?: SlashCommand[];
 }

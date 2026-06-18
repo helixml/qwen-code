@@ -34,7 +34,7 @@ describe('ToolConfirmationMessage', () => {
         confirmationDetails={confirmationDetails}
         config={mockConfig}
         availableTerminalHeight={30}
-        terminalWidth={80}
+        contentWidth={80}
       />,
     );
 
@@ -58,7 +58,7 @@ describe('ToolConfirmationMessage', () => {
         confirmationDetails={confirmationDetails}
         config={mockConfig}
         availableTerminalHeight={30}
-        terminalWidth={80}
+        contentWidth={80}
       />,
     );
 
@@ -81,7 +81,7 @@ describe('ToolConfirmationMessage', () => {
         confirmationDetails={confirmationDetails}
         config={mockConfig}
         availableTerminalHeight={30}
-        terminalWidth={80}
+        contentWidth={80}
       />,
     );
 
@@ -138,17 +138,17 @@ describe('ToolConfirmationMessage', () => {
       {
         description: 'for exec confirmations',
         details: execConfirmationDetails,
-        alwaysAllowText: 'Yes, allow always',
+        alwaysAllowText: 'Always allow in this project',
       },
       {
         description: 'for info confirmations',
         details: infoConfirmationDetails,
-        alwaysAllowText: 'Yes, allow always',
+        alwaysAllowText: 'Always allow in this project',
       },
       {
         description: 'for mcp confirmations',
         details: mcpConfirmationDetails,
-        alwaysAllowText: 'always allow',
+        alwaysAllowText: 'Always allow in this project',
       },
     ])('$description', ({ details, alwaysAllowText }) => {
       it('should show "allow always" when folder is trusted', () => {
@@ -162,7 +162,7 @@ describe('ToolConfirmationMessage', () => {
             confirmationDetails={details}
             config={mockConfig}
             availableTerminalHeight={30}
-            terminalWidth={80}
+            contentWidth={80}
           />,
         );
 
@@ -180,7 +180,7 @@ describe('ToolConfirmationMessage', () => {
             confirmationDetails={details}
             config={mockConfig}
             availableTerminalHeight={30}
-            terminalWidth={80}
+            contentWidth={80}
           />,
         );
 
@@ -212,7 +212,7 @@ describe('ToolConfirmationMessage', () => {
           confirmationDetails={editConfirmationDetails}
           config={mockConfig}
           availableTerminalHeight={30}
-          terminalWidth={80}
+          contentWidth={80}
         />,
         {
           settings: {
@@ -235,7 +235,7 @@ describe('ToolConfirmationMessage', () => {
           confirmationDetails={editConfirmationDetails}
           config={mockConfig}
           availableTerminalHeight={30}
-          terminalWidth={80}
+          contentWidth={80}
         />,
         {
           settings: {
